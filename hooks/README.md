@@ -7,7 +7,7 @@ flags whichever ones are waiting for the user (yellow = `Stop`, red =
 small Claude Code hook.
 ## Install
 1. The hook script lives at
-   `script/stream_deck/gnome-extension/hooks/streamdeck-tiler-hook.py`.
+   `script/gnome-extension/erplibre_home/hooks/streamdeck-tiler-hook.py`.
    It is already executable and only needs Python 3.
 2. Wire it into Claude Code by adding the matchers below to
    `~/.claude/settings.json` (merge with any existing `hooks` block).
