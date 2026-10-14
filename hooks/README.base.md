@@ -30,13 +30,13 @@ Le badge lit des fichiers JSON écrits par un petit hook Claude Code.
 
 <!-- [en] -->
 1. The hook script lives at
-   `script/stream_deck/gnome-extension/hooks/streamdeck-tiler-hook.py`.
+   `script/gnome-extension/erplibre_home/hooks/streamdeck-tiler-hook.py`.
    It is already executable and only needs Python 3.
 2. Wire it into Claude Code by adding the matchers below to
    `~/.claude/settings.json` (merge with any existing `hooks` block).
 <!-- [fr] -->
 1. Le script du hook est dans
-   `script/stream_deck/gnome-extension/hooks/streamdeck-tiler-hook.py`.
+   `script/gnome-extension/erplibre_home/hooks/streamdeck-tiler-hook.py`.
    Il est déjà exécutable et ne dépend que de Python 3.
 2. Branche-le dans Claude Code en ajoutant les matchers ci-dessous à
    `~/.claude/settings.json` (fusionne avec ton bloc `hooks` existant).
