@@ -24,7 +24,7 @@ persistent storage outside `$XDG_STATE_HOME/erplibre-home/`.
          | adds indicators
          v
 +--------+----------+      D-Bus      +---------------------+
-|  Top-bar buttons  | <-------------> |  game_tiler.py      |
+|  Top-bar buttons  | <-------------> | erplibre_streamdeck |
 |  (indicators/*)   |                 |  (Stream Deck       |
 |                   |                 |   physical hardware)|
 +-------------------+                 +---------------------+
@@ -52,9 +52,14 @@ persistent storage outside `$XDG_STATE_HOME/erplibre-home/`.
 6. **Optional desktop notification**. When a session transitions to
    `awaiting_notification` the extension fires `Main.notify(...)`
    once per `ts_notification` value (throttled).
-7. **Deck mirror**. `game_tiler.py` reads the same state files in
-   its render loop and shows a coloured per-session button (green /
-   cyan / yellow / red) on its idle layout.
+7. **Deck mirror**. The deck program's `claude_sessions` plugin
+   (`erplibre_streamdeck/plugins/claude_sessions.py`) reads the same state
+   files on the deck's loop and shows a coloured per-session button
+   (green / cyan / yellow / red) on its idle layout; `mpv_sessions.py`
+   does the same for the mpv state directory. A session whose pid now
+   belongs to a younger process is dropped (`liveness.py`), and a session
+   page refreshes every `DECK_SESSION_REFRESH_SEC` and goes home when its
+   session ends.
 
 ## Key surfaces
 
@@ -65,7 +70,7 @@ persistent storage outside `$XDG_STATE_HOME/erplibre-home/`.
 | Watcher | `lib/claude-state.js` | `parseStateEntry`, `indexSessions`. Pure helpers, unit-tested. |
 | Indicator | `indicators/pencil.js` | Lazy import so node tests can read `lib/`. |
 | D-Bus | `extension.js` | Interface `org.gnome.Shell.Extensions.ERPLibreHome` exposes `FocusClaudeSession`, `GetFocusedWindowId`, `AcceptClaudeSession`, `SetClaudeSessionWindow`, `KillClaudeSession`, `RenameClaudeSession`, `DebugClaudeIndex`, `ListMpvSessions`, `MpvSendCommand`, `TileWindow`, `OpenPath`, `OpenMedia`, etc. |
-| Driver | `script/stream_deck/game_tiler.py` | Python streamdeck library, reads the same state directories, calls back into the extension over D-Bus. |
+| Driver | `script/stream_deck/erplibre_streamdeck/` (package, one plugin per feature) | Python streamdeck library, reads the same state directories, calls back into the extension over D-Bus. |
 
 ## D-Bus interface
 
@@ -84,9 +89,12 @@ Used by:
 
 ## Hot reload
 
-`HotReload` clones the source folder under
-`erplibre-home-reload-{ts}@technolibre.ca`, calls
-`gnome-extensions enable` on the new UUID and disables the old one.
+`HotReload` builds `erplibre-home-reload-{ts}@technolibre.ca` as a real
+directory: one symlink per entry of the source folder, and a
+`metadata.json` of its own that names the new UUID, so the checkout's
+file is never written. It then enables the new UUID and disables the old
+one. `projectRootFrom` finds the checkout through the directory's
+`extension.js` link.
 Each indicator class registers a per-process random `GTypeName`
 suffix so the second load does not collide with GObject's
 process-wide type table.

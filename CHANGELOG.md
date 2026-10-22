@@ -8,6 +8,10 @@ migrations that are not auto-applied.
 ## [Unreleased]
 
 ### Changed
+- The Games submenu sends `X-Stream-Deck-Gallery: 1` with `/launch/<id>`:
+  the Stream Deck game gallery (games contract 2.0) refuses an action
+  without it, so another site's page cannot launch a game through it. A
+  gallery that refuses for any reason still shows its one-line error.
 - The extension is now **ERPLibre Home** (`erplibre-home@technolibre.ca`),
   in `script/gnome-extension/erplibre_home/`. Every identifier follows:
   schema `org.gnome.shell.extensions.erplibre-home`, D-Bus interface
@@ -49,6 +53,9 @@ migrations that are not auto-applied.
   `make erplibre_home_install_extension`.
 
 ### Fixed
+- Launching a game from the menu says why the gallery refused it — the
+  games turned off by `GAMES=off`, an unknown game — instead of failing
+  silently; only an unreachable gallery was reported before.
 - GNOME Shell 51: `shell-version` declares it, and `lib/shell-compat.js`
   covers the APIs it drops. Every indicator mounts again (`St.BoxLayout`
   `vertical` is gone), `ListWindows` and `ApplyLayout` see the windows
@@ -67,8 +74,9 @@ migrations that are not auto-applied.
   metadata.json in place — fewer accidental git diffs.
 - Device indicator finds the checkout through the extension symlink
   (installed link and hot-reload copy alike) and launches the
-  controller with `.venv.streamdeck`; the gallery launcher runs
-  `make streamdeck_gallery`. Without that venv, both say that
+  controller with `.venv.streamdeck`; the gallery launcher starts
+  `gallery_server.py` with the same interpreter, without `make`.
+  Without that venv, both say that
   ERPLibre Home Stream Deck is not installed and name
   `make erplibre_home_streamdeck_install`, instead of failing.
 

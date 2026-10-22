@@ -8,11 +8,12 @@ Run after each `gnome-extensions enable` cycle.
 
 - [ ] Controller indicator shows in top bar with `input-gaming-symbolic` icon
 - [ ] Click → menu: About, Start gallery server… ▶, ERPLibre ▶, Games ▶, "Open prefs…"
-- [ ] ERPLibre submenu lists "Window Tiler" (when gallery server is running)
+- [ ] ERPLibre submenu is hidden (the deck program is not in the gallery list); "Window Tiler" starts from the `device` indicator's "Start deck program"
 - [ ] Games submenu lists every other game and excludes Window Tiler
-- [ ] "Start gallery server…" submenu lists every entry from the `paths` GSetting (label + path)
-- [ ] Picking a path opens gnome-terminal in that directory running `source .venv.erplibre/bin/activate && make streamdeck_gallery`
-- [ ] If `paths` is empty the submenu shows "(no paths configured — add one in pencil prefs)"
+- [ ] "Start gallery server…" submenu lists "This checkout (<checkout of the extension>)" first, then every other entry from the `paths` GSetting (label + path); a path equal to the checkout appears once
+- [ ] A folder without `.venv.streamdeck/bin/python` or `script/stream_deck/games/gallery_server.py` shows "— Stream Deck not installed" and is insensitive
+- [ ] Picking a folder opens a terminal there running `<folder>/.venv.streamdeck/bin/python <folder>/script/stream_deck/games/gallery_server.py`
+- [ ] Only when the checkout of the extension is unknown and `paths` is empty does the submenu show "(no paths configured — add one in pencil prefs)"
 - [ ] Submenu top line shows `○ Offline` when the gallery is not running
 - [ ] After launching, re-opening the menu (or waiting ~2.5s + reopening) shows `● Running on http://localhost:8042`, the submenu title becomes "Gallery server (running) …", and an "Open in browser" item appears
 - [ ] Path entries show "— port busy" + are insensitive while running
@@ -91,9 +92,9 @@ Run after each `gnome-extensions enable` cycle.
 - [ ] No deck plugged in: "(no Stream Deck found)"
 - [ ] Plug deck + click "Re-scan USB" → row appears with product + serial
 - [ ] Status item → notification with bus/device/vendor/serial
-- [ ] Open controller UI → erplibre_controller.py runs (verify `pgrep -af erplibre_controller`)
+- [ ] Start deck program → with the deck service unit, `systemctl --user start erplibre-home-streamdeck.service` runs the program the settings name, and a notification says why when its condition skips it (no deck, `DECK_PROGRAM=none`); without the unit, erplibre_controller.py runs (verify `pgrep -af erplibre_controller`)
 - [ ] Pidfile `~/.cache/erplibre-home/controller.pid` exists after launch
-- [ ] Restart deck → controller exits + relaunches (PID changes; note: SIGTERM may leave pidfile stale until next launch overwrites it)
+- [ ] Restart deck → controller exits + relaunches (PID changes; on SIGTERM the controller resets its decks and removes its pidfile before exiting)
 - [ ] Show details → notification with truncated `lsusb -v` output
 
 ## Cross-cutting (Plan G)

@@ -157,7 +157,22 @@ msgstr ""
 msgid "Status"
 msgstr ""
 
-msgid "Open controller UI"
+msgid "Start deck program"
+msgstr ""
+
+msgid "The deck program did not start:"
+msgstr ""
+
+msgid "the deck is held by"
+msgstr ""
+
+msgid "another program"
+msgstr ""
+
+msgid "no visual Stream Deck is plugged in"
+msgstr ""
+
+msgid "its start condition is not met (DECK_PROGRAM=none, no venv or no Stream Deck plugged in)"
 msgstr ""
 
 msgid "Restart deck"
@@ -307,6 +322,12 @@ msgstr ""
 msgid "port busy"
 msgstr ""
 
+msgid "This checkout"
+msgstr ""
+
+msgid "Stream Deck not installed"
+msgstr ""
+
 msgid "Gallery offline (start gallery_server.py)"
 msgstr ""
 
@@ -317,6 +338,9 @@ msgid "No games found"
 msgstr ""
 
 msgid "Could not launch {id}: gallery offline?"
+msgstr ""
+
+msgid "Could not launch {id}: {why}"
 msgstr ""
 
 msgid "Active sessions"

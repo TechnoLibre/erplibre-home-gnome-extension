@@ -88,16 +88,12 @@ gdbus call --session \
   fast iteration.
 
 ### Top-bar indicator labels stuck in English
-- Locales aren't compiled. Run
-  `make erplibre_home_compile_locale` (the install target chains
-  it automatically since 2026-04).
+- Locales aren't compiled. `make erplibre_home_install_extension`
+  recompiles them with `msgfmt --check`, as every install does;
+  `make erplibre_home_compile_locale` compiles them alone, under the
+  system `python3`.
 - `LANG` does not start with `fr` / your target language; verify with
   `echo $LANG`.
-
-### HotReload pollutes git with metadata.json edits
-- Each HotReload mutates the symlinked metadata.json to give the
-  reload UUID a unique name. Reset before commit:
-  `git checkout -- script/gnome-extension/erplibre_home/metadata.json`.
 
 ### Stream Deck device not detected
 - `lsusb` should list the Elgato vendor (0fd9). If yes but the
@@ -107,7 +103,8 @@ gdbus call --session \
 
 ### Tiling mode locks on the corner-pick grid
 - Fixed: TILE auto-cancels after 5 s of inactivity. If your timeout
-  feels off, override `TILING_IDLE_TIMEOUT_SEC` in `game_tiler.py`.
+  feels off, override `TILING_IDLE_TIMEOUT_SEC` in
+  `erplibre_streamdeck/plugins/tiling.py`.
 
 ## Reset to a clean state
 

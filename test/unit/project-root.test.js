@@ -2,7 +2,9 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {projectRootFrom, makeGioReadLink, normalizePath, resolveLinkTarget,
-    streamDeckPython} from '../../lib/project-root.js';
+    resolveLinks,
+    streamDeckPython, galleryServerCommand, galleryReady}
+    from '../../lib/project-root.js';
 
 const CHECKOUT = '/opt/depot';
 const EXT_SRC = `${CHECKOUT}/script/gnome-extension/erplibre_home`;
@@ -66,7 +68,33 @@ test('relative symlink: resolved against the link parent', () => {
     assert.equal(projectRootFrom(LINK, linksTo({[LINK]: target})), CHECKOUT);
 });
 
-test('hot-reload uuid dir: a copy of the link, same root', () => {
+test('hot-reload uuid dir: a real dir whose entries link to the source',
+    () => {
+        const reload =
+            `${EXT_DIR}/erplibre-home-reload-1700000000000@technolibre.ca`;
+        const readLink = linksTo({
+            [`${reload}/extension.js`]: `${EXT_SRC}/extension.js`,
+        });
+        assert.equal(projectRootFrom(reload, readLink), CHECKOUT);
+        assert.equal(projectRootFrom(`${reload}/`, readLink), CHECKOUT);
+    });
+
+test('a dir whose extension.js links elsewhere keeps its own path', () => {
+    const dir = '/opt/ailleurs/erplibre_home';
+    const readLink = linksTo({[`${dir}/extension.js`]: '/opt/x/extension.js'});
+    assert.equal(projectRootFrom(dir, readLink), dir);
+});
+
+test('resolveLinks follows a chain and stops on a cycle', () => {
+    const middle = '/opt/liens/extension';
+    assert.equal(resolveLinks(LINK, linksTo({[LINK]: middle,
+        [middle]: EXT_SRC})), EXT_SRC);
+    assert.equal(resolveLinks(`${LINK}/`, linksTo({})), LINK);
+    const loop = linksTo({'/a': '/b', '/b': '/a'});
+    assert.ok(['/a', '/b'].includes(resolveLinks('/a', loop)));
+});
+
+test('hot-reload uuid dir: a link to the source, same root', () => {
     const reload =
         `${EXT_DIR}/erplibre-home-reload-1700000000000@technolibre.ca`;
     assert.equal(projectRootFrom(reload, linksTo({[reload]: EXT_SRC})),
@@ -82,7 +110,7 @@ test('chained symlinks are followed', () => {
 test('a symlink cycle stops after a bounded number of hops', () => {
     const readLink = linksTo({[LINK]: 'erplibre-home@technolibre.ca'});
     assert.equal(projectRootFrom(LINK, readLink), LINK);
-    assert.equal(readLink.calls.length, 8);
+    assert.equal(readLink.calls.filter((c) => c === LINK).length, 8);
 });
 
 test('a readLink that throws counts as no symlink', () => {
@@ -208,4 +236,49 @@ test('both deck indicators show that message, and only through _()', () => {
         assert.ok(src.includes('streamDeckPython('), js);
         assert.ok(!src.includes('.venv.erplibre'), js);
     }
+});
+
+test('galleryServerCommand runs the gallery under the venv python, no make', () => {
+    assert.equal(galleryServerCommand(CHECKOUT, DECK_PYTHON),
+        `'${DECK_PYTHON}' '${CHECKOUT}/script/stream_deck/games/gallery_server.py'`);
+    assert.equal(galleryServerCommand(`${CHECKOUT}/`, DECK_PYTHON),
+        `'${DECK_PYTHON}' '${CHECKOUT}/script/stream_deck/games/gallery_server.py'`);
+});
+
+test('galleryServerCommand quotes a path with a space or a quote', () => {
+    const root = "/opt/mon dépôt/l'autre";
+    const python = `${root}/.venv.streamdeck/bin/python`;
+    assert.equal(galleryServerCommand(root, python),
+        "'/opt/mon dépôt/l'\\''autre/.venv.streamdeck/bin/python' " +
+        "'/opt/mon dépôt/l'\\''autre/script/stream_deck/games/gallery_server.py'");
+});
+
+test('the controller launches the gallery through galleryServerCommand', () => {
+    const src = extensionFile('indicators/controller.js');
+    assert.ok(src.includes('galleryServerCommand('));
+    assert.ok(!src.includes('make streamdeck_gallery'));
+});
+
+test('the ERPLibre submenu shows only when the gallery lists a tool', () => {
+    const src = extensionFile('indicators/controller.js');
+    assert.ok(src.includes('this._erplibreSection.visible = false;'));
+    assert.ok(src.includes(
+        'this._erplibreSection.visible = erplibre.length > 0;'));
+    assert.ok(!src.includes("_('No ERPLibre tools')"));
+});
+
+test('galleryReady needs both the deck venv and the gallery server', () => {
+    const venv = `${CHECKOUT}/.venv.streamdeck/bin/python`;
+    const server = `${CHECKOUT}/script/stream_deck/games/gallery_server.py`;
+    const has = (set) => (p) => set.includes(p);
+    assert.equal(galleryReady(CHECKOUT, has([venv]), has([server])), true);
+    assert.equal(galleryReady(`${CHECKOUT}/`, has([venv]), has([server])),
+        true);
+    assert.equal(galleryReady(CHECKOUT, has([]), has([server])), false);
+    assert.equal(galleryReady(CHECKOUT, has([venv]), has([])), false);
+    const boom = () => {
+        throw new Error('stat');
+    };
+    assert.equal(galleryReady(CHECKOUT, has([venv]), boom), false);
+    assert.equal(galleryReady('', has([venv]), has([server])), false);
 });

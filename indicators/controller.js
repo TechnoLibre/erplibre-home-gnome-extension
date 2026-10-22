@@ -15,7 +15,11 @@ import {_} from '../lib/i18n.js';
 import {parseList} from '../lib/settings.js';
 import {buildTerminalArgv, findTerminal, spawnDetached}
     from '../lib/spawn.js';
-import {streamDeckPython} from '../lib/project-root.js';
+import {projectRootFrom, makeGioReadLink, streamDeckPython,
+    galleryServerCommand, galleryReady} from '../lib/project-root.js';
+import {
+    GALLERY_ACTION_HEADER, launchRefusal, galleryTargets,
+} from '../lib/gallery-launch.js';
 
 const GALLERY_PORT = 8042;
 const GALLERY_URL = `http://localhost:${GALLERY_PORT}`;
@@ -118,7 +122,8 @@ class ControllerIndicator extends PanelMenu.Button {
         this._erplibreSection = new PopupMenu.PopupSubMenuMenuItem(
             'ERPLibre');
         this.menu.addMenuItem(this._erplibreSection);
-        this._populateSectionPlaceholder(this._erplibreSection, _('Loading…'));
+        // Shown only when the gallery lists a tool with section 'erplibre'.
+        this._erplibreSection.visible = false;
 
         this._gamesSection = new PopupMenu.PopupSubMenuMenuItem(_('Games'));
         this.menu.addMenuItem(this._gamesSection);
@@ -172,38 +177,59 @@ class ControllerIndicator extends PanelMenu.Button {
             this._gallerySection.menu.addMenuItem(open);
         }
 
+        // The checkout of the extension comes first, then the pencil's
+        // paths; a folder without the Stream Deck level is greyed out
+        // instead of failing at the click. Readiness is read again each
+        // time the menu opens, since the gallery probe repopulates it.
         const paths = this._settings
             ? parseList(this._settings.get_string('paths'))
             : [];
-        if (!paths.length) {
+        const targets = galleryTargets(this._projectRoot(), paths,
+            (p) => galleryReady(p,
+                (f) => GLib.file_test(f, GLib.FileTest.IS_EXECUTABLE),
+                (f) => GLib.file_test(f, GLib.FileTest.IS_REGULAR)));
+        if (!targets.length) {
             this._gallerySection.menu.addMenuItem(
                 new PopupMenu.PopupMenuItem(
                     _('(no paths configured — add one in pencil prefs)'),
                     {reactive: false}));
             return;
         }
-        for (const p of paths) {
-            const baseLabel = p.label && p.label.trim() !== ''
-                ? `${p.label} (${p.path})` : p.path;
-            const label = online ? `${baseLabel} — ${_('port busy')}`
-                : baseLabel;
-            const item = new PopupMenu.PopupMenuItem(label,
-                {reactive: !online});
-            if (!online) {
+        for (const target of targets) {
+            const name = target.own ? _('This checkout')
+                : target.label.trim();
+            let label = name ? `${name} (${target.path})` : target.path;
+            let reactive = false;
+            if (online)
+                label = `${label} — ${_('port busy')}`;
+            else if (!target.ready)
+                label = `${label} — ${_('Stream Deck not installed')}`;
+            else
+                reactive = true;
+            const item = new PopupMenu.PopupMenuItem(label, {reactive});
+            if (reactive) {
                 item.connect('activate',
-                    () => this._launchGalleryAt(p.path));
+                    () => this._launchGalleryAt(target.path));
             }
             this._gallerySection.menu.addMenuItem(item);
         }
     }
 
+    _projectRoot() {
+        // extension.path is the link under gnome-shell/extensions; the
+        // checkout root is derived from the link target, as in device.js.
+        if (!this._extension?.path) return '';
+        return projectRootFrom(this._extension.path, makeGioReadLink(Gio));
+    }
+
     async _launchGalleryAt(cwd) {
-        // make streamdeck_gallery runs the gallery under .venv.streamdeck,
-        // which only the Stream Deck level creates. It is looked up under
-        // the configured path at the click, so a level added after the
-        // session started is found.
-        if (streamDeckPython(cwd,
-            (p) => GLib.file_test(p, GLib.FileTest.IS_EXECUTABLE)) === null) {
+        // The gallery runs under .venv.streamdeck/bin/python, which only
+        // the Stream Deck level creates, started directly rather than
+        // through make. The venv is looked up under the configured path at
+        // the click, so a level added after the session started is found.
+        const python = streamDeckPython(cwd,
+            (p) => GLib.file_test(p, GLib.FileTest.IS_EXECUTABLE));
+        if (python === null) {
             _notify(PROJECT_NAME,
                 _('ERPLibre Home Stream Deck is not installed: make erplibre_home_streamdeck_install'));
             return;
@@ -216,7 +242,7 @@ class ControllerIndicator extends PanelMenu.Button {
         }
         const argv = buildTerminalArgv({
             cwd,
-            command: 'make streamdeck_gallery',
+            command: galleryServerCommand(cwd, python),
             terminal,
         });
         const ok = await spawnDetached(argv,
@@ -239,7 +265,7 @@ class ControllerIndicator extends PanelMenu.Button {
 
     _populateGamesPlaceholder(label) {
         this._populateSectionPlaceholder(this._gamesSection, label);
-        this._populateSectionPlaceholder(this._erplibreSection, label);
+        this._erplibreSection.visible = false;
     }
 
     _refreshGames() {
@@ -304,8 +330,9 @@ class ControllerIndicator extends PanelMenu.Button {
                 .localeCompare(b.name || b.id || ''));
         const erplibre = sorted.filter(g => g.section === 'erplibre');
         const others = sorted.filter(g => g.section !== 'erplibre');
-        this._fillSection(this._erplibreSection, erplibre,
-            _('No ERPLibre tools'));
+        this._erplibreSection.visible = erplibre.length > 0;
+        if (erplibre.length)
+            this._fillSection(this._erplibreSection, erplibre, '');
         this._fillSection(this._gamesSection, others, _('No games found'));
     }
 
@@ -331,14 +358,25 @@ class ControllerIndicator extends PanelMenu.Button {
         session.timeout = 3;
         const message = Soup.Message.new('GET',
             `${GALLERY_URL}/launch/${gameId}`);
+        message.get_request_headers().append(GALLERY_ACTION_HEADER, '1');
         session.send_and_read_async(
             message, GLib.PRIORITY_DEFAULT, null, (sess, result) => {
+                let bytes;
                 try {
-                    sess.send_and_read_finish(result);
+                    bytes = sess.send_and_read_finish(result);
                 } catch (_e) {
                     _notify(PROJECT_NAME,
                         _('Could not launch {id}: gallery offline?')
                             .replace('{id}', gameId));
+                    return;
+                }
+                const why = launchRefusal(message.get_status(),
+                    new TextDecoder().decode(bytes.get_data() ?? []));
+                if (why) {
+                    _notify(PROJECT_NAME,
+                        _('Could not launch {id}: {why}')
+                            .replace('{id}', gameId)
+                            .replace('{why}', why));
                 }
             });
     }
