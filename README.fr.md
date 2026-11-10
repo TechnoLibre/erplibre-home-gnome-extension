@@ -157,8 +157,10 @@ fichier d'état.
 
 Quand Odoo est arrêté ou lent, les événements attendent dans une file par
 destination (1000 événements ou 30 jours) et arrivent dans Odoo avec
-l'heure où ils ont eu lieu : GNOME Shell n'attend jamais Odoo. Le protocole
-est dans [CONTRACT.md](CONTRACT.md), section « Odoo inventory ».
+l'heure où ils ont eu lieu : GNOME Shell n'attend jamais Odoo. Un deck
+branché ou débranché pendant que l'extension est arrêtée (écran verrouillé,
+session fermée) est signalé à son démarrage suivant, daté de ce moment. Le
+protocole est dans [CONTRACT.md](CONTRACT.md), section « Odoo inventory ».
 
 ## Pastilles de comptage
 

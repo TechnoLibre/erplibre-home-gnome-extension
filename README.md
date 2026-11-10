@@ -153,7 +153,9 @@ then deletes the destination and its state file.
 
 While Odoo is down or slow, the events wait in a queue per destination
 (1000 events or 30 days) and reach Odoo with the time they happened: GNOME
-Shell never waits for Odoo. The wire protocol is in
+Shell never waits for Odoo. A deck plugged or unplugged while the
+extension is off (screen locked, session closed) is reported at its next
+start, dated then. The wire protocol is in
 [CONTRACT.md](CONTRACT.md), section « Odoo inventory ».
 
 ## Icon badges

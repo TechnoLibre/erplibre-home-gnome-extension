@@ -73,7 +73,10 @@ and, for the inventory tokens, the GNOME keyring.
 2. **Queue.** Each change becomes dated events (`diffDecks`,
    `serviceChanged` in `lib/inventory.js`), queued per destination in an
    `EventQueue` and saved in its state file,
-   `$XDG_STATE_HOME/erplibre-home/inventory/<id>.json` (mode 0600).
+   `$XDG_STATE_HOME/erplibre-home/inventory/<id>.json` (mode 0600). What
+   the service last saw goes to `inventory-seen.json` beside it: the
+   first scan and deck service reading after a start (the extension is
+   disabled at each screen lock) are compared with it.
 3. **Report.** One report at a time per destination, at each change and
    every `heartbeat_s`: `postJson` (`lib/odoo-http.js`, Soup 3) selects
    the database, then posts the state and the queued events with the

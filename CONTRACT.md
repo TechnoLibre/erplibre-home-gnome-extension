@@ -242,7 +242,10 @@ route.
 every 900 s otherwise, or every `heartbeat_s` of the last reply; one at a
 time per destination. A call is abandoned after 10 s and counts as
 offline: its events wait in the queue of the destination, which keeps
-1000 events or 30 days, the oldest dropping first.
+1000 events or 30 days, the oldest dropping first. The extension is
+disabled at each screen lock, logout or GNOME Shell restart: at its next
+start it compares the decks and the deck service with those it last saw,
+and reports a difference as events dated at that start.
 
 **Identity and secrets.**
 
@@ -266,6 +269,10 @@ offline: its events wait in the queue of the destination, which keeps
   pending, lastReport, error}}`, read back only when it names the
   destination's URL and database. It never holds a secret; ERPLibre does
   not read it.
+- `$XDG_STATE_HOME/erplibre-home/inventory-seen.json`, mode 0600, written
+  by the extension only: `{decks, service}`, the decks (`serial`,
+  `usb_product_id`, `usb_path`) and the deck service state it last saw.
+  It never holds a secret; ERPLibre does not read it.
 
 ## Versioning
 

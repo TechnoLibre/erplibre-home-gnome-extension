@@ -359,6 +359,13 @@ test('the inventory section states where the workstation keeps its part',
             '/erplibre-home/inventory/${destId}.json`;'));
         assert.ok(inv.includes(
             '`$XDG_STATE_HOME/erplibre-home/inventory/<id>.json`'));
+        assert.ok(service.includes(
+            '/erplibre-home/inventory-seen.json`;'));
+        assert.ok(inv.includes(
+            '`$XDG_STATE_HOME/erplibre-home/inventory-seen.json`'));
+        assert.ok(inv.includes('compares the decks and the deck service '
+            + 'with those it last saw, and reports a difference as events '
+            + 'dated at that start'));
         assert.ok(inv.includes('`inventory-destinations`'));
         assert.ok(text('schemas/org.gnome.shell.extensions.erplibre-home'
             + '.gschema.xml').includes('<key name="inventory-destinations"'));

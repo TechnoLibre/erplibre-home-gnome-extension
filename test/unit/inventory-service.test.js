@@ -521,6 +521,95 @@ test('a restarted service sends what the state file kept', async () => {
         ['SN-INVENTED-A']);
 });
 
+// ------------------------------------- while the service was stopped
+// The service stops at each screen lock, logout or GNOME Shell restart:
+// what changed meanwhile is an event of the start, dated then.
+
+/** Replies ok to every call, accepting its events, until none is left. */
+async function drain() {
+    const events = [];
+    for (let i = 0; i < h.calls.length; i++) {
+        events.push(...h.calls[i].body.events);
+        await reply(i, ok(h.calls[i].body.events.map(e => e.uuid)));
+    }
+    return events;
+}
+
+test('a deck unplugged while the service was stopped is an event at start',
+    async () => {
+        await enrolledAndReported([DECK_A, DECK_B]);
+        h.service.stop();
+        await settle();
+        harness();
+        h.now = '2026-03-01T11:00:00.000Z';
+        h.usb.emit([DECK_A]);
+        await settle();
+        assert.deepEqual(await drain(), [{uuid: 'uuid-1', kind: 'unplugged',
+            at: '2026-03-01T11:00:00.000Z', serial: null,
+            usb_product_id: '006d', usb_path: '1-4.1', service_state: null}]);
+        assert.equal(h.service.status('d1').pending, 0);
+    });
+
+test('a deck plugged while the service was stopped is an event at start',
+    async () => {
+        await enrolledAndReported([DECK_A]);
+        h.service.stop();
+        await settle();
+        harness();
+        h.usb.emit([DECK_B, DECK_A]);
+        await settle();
+        assert.deepEqual((await drain()).map(e => [e.kind, e.usb_path]),
+            [['plugged', '1-4.1']]);
+    });
+
+test('a deck service changed while the service was stopped is an event '
+    + 'at start', async () => {
+    await enrolledAndReported([]);
+    h.service.stop();
+    await settle();
+    harness();
+    h.serviceState = 'failed';
+    h.usb.emit([]);
+    await settle();
+    assert.deepEqual((await drain()).map(e => [e.kind, e.service_state]),
+        [['service_changed', 'failed']]);
+});
+
+test('the same decks and service after a stop give no event', async () => {
+    await enrolledAndReported([DECK_A]);
+    h.service.stop();
+    await settle();
+    harness();
+    h.usb.emit([DECK_A]);
+    await settle();
+    assert.deepEqual(await drain(), []);
+});
+
+test('what the service last saw is kept in a private file of its own',
+    async () => {
+        await enrolledAndReported([DECK_A]);
+        await settle();
+        const file = svc.seenFilePath(fake.env.XDG_STATE_HOME);
+        assert.equal(file, path.join(fake.env.XDG_STATE_HOME,
+            'erplibre-home', 'inventory-seen.json'));
+        assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+        const text = fs.readFileSync(file, 'utf8');
+        assert.ok(!text.includes('TOKEN'));
+        assert.deepEqual(JSON.parse(text), {decks: [{serial: 'SN-INVENTED-A',
+            usb_product_id: '0084', usb_path: '1-2'}], service: 'active'});
+        assert.equal(svc.seenFilePath('relative'), null);
+    });
+
+test('a corrupt file of what was seen is a first start', async () => {
+    fs.mkdirSync(path.join(fake.env.XDG_STATE_HOME, 'erplibre-home'),
+        {recursive: true});
+    fs.writeFileSync(svc.seenFilePath(fake.env.XDG_STATE_HOME), '{not');
+    harness();
+    h.usb.emit([DECK_A]);
+    await settle();
+    assert.deepEqual(await drain(), []);
+});
+
 test('a corrupt state file gives an empty queue', async () => {
     fs.mkdirSync(path.dirname(stateFile()), {recursive: true});
     fs.writeFileSync(stateFile(), '{not json');
@@ -821,7 +910,8 @@ test('a state file kept for another URL or database is not read back',
         await settle();
         assert.deepEqual(h.service.status('d1'), {state: 'unenrolled',
             pending: 0, lastReport: null, error: null});
-        h.usb.emit([]);
+        // The same deck as before the stop: no event of the start.
+        h.usb.emit([DECK_A]);
         await settle();
         assert.deepEqual(h.calls[0].body.events, []);
         assert.equal(h.calls[0].token, 'TOKEN-OTHER');
