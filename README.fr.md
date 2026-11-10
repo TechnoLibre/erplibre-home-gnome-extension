@@ -152,8 +152,9 @@ Odoo rend un jeton de poste, qui vit dans le trousseau GNOME (schéma
 libsecret `ca.technolibre.erplibre-home.inventory`) et nulle part
 ailleurs ; le code, la clé ou le mot de passe n'est envoyé qu'une fois et
 n'est jamais gardé. **Désinscrire** révoque le jeton dans Odoo et l'oublie
-ici ; **Retirer** fait de même, puis supprime la destination et son
-fichier d'état.
+ici, et les événements qui attendaient encore cet Odoo sont abandonnés :
+ils n'atteignent jamais une inscription suivante ; **Retirer** fait de
+même, puis supprime la destination et son fichier d'état.
 
 Quand Odoo est arrêté ou lent, les événements attendent dans une file par
 destination (1000 événements ou 30 jours) et arrivent dans Odoo avec

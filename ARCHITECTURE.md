@@ -89,7 +89,10 @@ and, for the inventory tokens, the GNOME keyring.
    `lib/inventory-prefs.js`) writes the destinations to
    `inventory-destinations`, enrolls them (`/streamdeck/v1/enroll`, the
    token to the keyring) and reads the state files for the statuses. The
-   service picks a new token up within `POLL_S`.
+   service picks a new token up within `POLL_S`, and sees one the
+   preferences cleared within `POLL_S` too: that destination queues
+   nothing more, and drops its queue once the token is still missing
+   `POLL_S` later.
 
 The wire protocol is in `CONTRACT.md`, section « Odoo inventory ».
 

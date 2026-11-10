@@ -16,7 +16,7 @@ import {DECK_UNIT, CONTROLLER_REL, DECK_ENTRY_REL, deckLockPath}
 import {projectRootFrom, STREAMDECK_PYTHON_REL, GALLERY_SERVER_REL}
     from '../../lib/project-root.js';
 import {GALLERY_ACTION_HEADER} from '../../lib/gallery-launch.js';
-import {INVENTORY_PROTOCOL, HEARTBEAT_S, TIMEOUT_S, QUEUE_MAX,
+import {INVENTORY_PROTOCOL, HEARTBEAT_S, TIMEOUT_S, POLL_S, QUEUE_MAX,
     QUEUE_MAX_AGE_DAYS, ENROLL_PATH, REPORT_PATH, UNENROLL_PATH,
     ENROLL_METHODS, ERROR_CODES, buildState, diffDecks,
     workstationFingerprint} from '../../lib/inventory.js';
@@ -366,6 +366,10 @@ test('the inventory section states where the workstation keeps its part',
         assert.ok(inv.includes('compares the decks and the deck service '
             + 'with those it last saw, and reports a difference as events '
             + 'dated at that start'));
+        assert.ok(inv.includes('A destination whose token leaves the '
+            + 'keyring queues nothing more; still without one '
+            + `${POLL_S} s later, it drops the events it held, which never `
+            + 'reach a later enrollment'));
         assert.ok(inv.includes('`inventory-destinations`'));
         assert.ok(text('schemas/org.gnome.shell.extensions.erplibre-home'
             + '.gschema.xml').includes('<key name="inventory-destinations"'));

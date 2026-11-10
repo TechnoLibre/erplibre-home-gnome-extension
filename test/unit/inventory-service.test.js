@@ -464,6 +464,86 @@ test('a token cleared from the keyring makes the destination unenrolled',
         assert.equal(h.service.status('d1').state, 'unenrolled');
     });
 
+test('a token cleared by the preferences is seen at the next tick',
+    async () => {
+        // The preferences clear the keyring; nothing tells the service,
+        // which must not show « up to date » until the heartbeat.
+        await enrolledAndReported();
+        delete h.tokens.d1;
+        const [tick] = liveMs(POLL_S * 1000);
+        fire(tick);
+        await settle();
+        assert.equal(h.calls.length, 1, 'nothing sent');
+        assert.equal(h.service.status('d1').state, 'unenrolled');
+    });
+
+test('the events of an unenrolled destination never reach its next '
+    + 'enrollment', async () => {
+    await enrolledAndReported([]);
+    h.usb.emit([DECK_A]);
+    await settle();
+    await reply(1, [0, null]);
+    assert.equal(h.service.status('d1').pending, 1);
+    delete h.tokens.d1;
+    const [tick] = liveMs(POLL_S * 1000);
+    fire(tick);
+    await settle();
+    assert.equal(h.service.status('d1').state, 'unenrolled');
+    h.usb.emit([]);
+    await settle();
+    h.clockMs += POLL_S * 1000;
+    fire(tick);
+    await settle();
+    assert.equal(h.service.status('d1').pending, 0);
+    assert.deepEqual(readState().queue, {events: [], lost: 0});
+    // Another employee enrolls this destination: a fresh queue goes.
+    h.tokens.d1 = 'TOKEN-INVENTED-OTHER-0123456789abcdefghijklmn';
+    fire(tick);
+    await settle();
+    assert.equal(h.calls.length, 3);
+    assert.deepEqual(h.calls[2].body.events, []);
+    assert.equal(h.calls[2].body.lost_events, 0);
+});
+
+test('a token missing for one look only keeps the queue', async () => {
+    // Storing a token clears the old one first: a look in between finds
+    // none for an instant.
+    await enrolledAndReported([]);
+    h.usb.emit([DECK_A]);
+    await settle();
+    await reply(1, [0, null]);
+    delete h.tokens.d1;
+    const [tick] = liveMs(POLL_S * 1000);
+    fire(tick);
+    await settle();
+    // A second look at the same instant, by the retry, finds none either.
+    fire(liveMs(svc.RETRY_MIN_S * 1000)[0]);
+    await settle();
+    assert.equal(h.service.status('d1').pending, 1);
+    h.tokens.d1 = TOKEN;
+    h.clockMs += POLL_S * 1000;
+    fire(tick);
+    await settle();
+    assert.equal(h.calls.length, 3);
+    assert.deepEqual(h.calls[2].body.events.map(e => e.serial),
+        ['SN-INVENTED-A']);
+});
+
+test('a keyring error at the tick is not taken for a missing token',
+    async () => {
+        await enrolledAndReported([]);
+        h.keyringError = true;
+        const [tick] = liveMs(POLL_S * 1000);
+        fire(tick);
+        await settle();
+        assert.equal(h.service.status('d1').state, 'ok');
+        // Still enrolled: a change is queued and reported.
+        h.usb.emit([DECK_A]);
+        await settle();
+        assert.equal(h.service.status('d1').pending, 1);
+        assert.equal(h.service.status('d1').error, 'keyring');
+    });
+
 test('a keyring error keeps the events and tries again', async () => {
     await enrolledAndReported([]);
     h.keyringError = true;

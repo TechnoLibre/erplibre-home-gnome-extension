@@ -148,8 +148,10 @@ In the preferences, page **Odoo inventory**:
 Odoo returns a workstation token, which lives in the GNOME keyring
 (libsecret schema `ca.technolibre.erplibre-home.inventory`) and nowhere
 else; the code, key or password is sent once and never kept. **Unenroll**
-revokes the token in Odoo and forgets it here; **Remove** does the same,
-then deletes the destination and its state file.
+revokes the token in Odoo and forgets it here, and the events still
+waiting for that Odoo are dropped: they never reach a later enrollment;
+**Remove** does the same, then deletes the destination and its state
+file.
 
 While Odoo is down or slow, the events wait in a queue per destination
 (1000 events or 30 days) and reach Odoo with the time they happened: GNOME

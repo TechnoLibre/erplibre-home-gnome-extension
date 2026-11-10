@@ -266,8 +266,10 @@ In the preferences, page **Odoo inventory**:
 Odoo returns a workstation token, which lives in the GNOME keyring
 (libsecret schema `ca.technolibre.erplibre-home.inventory`) and nowhere
 else; the code, key or password is sent once and never kept. **Unenroll**
-revokes the token in Odoo and forgets it here; **Remove** does the same,
-then deletes the destination and its state file.
+revokes the token in Odoo and forgets it here, and the events still
+waiting for that Odoo are dropped: they never reach a later enrollment;
+**Remove** does the same, then deletes the destination and its state
+file.
 
 While Odoo is down or slow, the events wait in a queue per destination
 (1000 events or 30 days) and reach Odoo with the time they happened: GNOME
@@ -382,8 +384,9 @@ Odoo rend un jeton de poste, qui vit dans le trousseau GNOME (schéma
 libsecret `ca.technolibre.erplibre-home.inventory`) et nulle part
 ailleurs ; le code, la clé ou le mot de passe n'est envoyé qu'une fois et
 n'est jamais gardé. **Désinscrire** révoque le jeton dans Odoo et l'oublie
-ici ; **Retirer** fait de même, puis supprime la destination et son
-fichier d'état.
+ici, et les événements qui attendaient encore cet Odoo sont abandonnés :
+ils n'atteignent jamais une inscription suivante ; **Retirer** fait de
+même, puis supprime la destination et son fichier d'état.
 
 Quand Odoo est arrêté ou lent, les événements attendent dans une file par
 destination (1000 événements ou 30 jours) et arrivent dans Odoo avec

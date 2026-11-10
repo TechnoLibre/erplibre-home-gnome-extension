@@ -245,7 +245,11 @@ offline: its events wait in the queue of the destination, which keeps
 1000 events or 30 days, the oldest dropping first. The extension is
 disabled at each screen lock, logout or GNOME Shell restart: at its next
 start it compares the decks and the deck service with those it last saw,
-and reports a difference as events dated at that start.
+and reports a difference as events dated at that start. A destination
+whose token leaves the keyring queues nothing more; still without one
+10 s later, it drops the events it held, which never reach a later
+enrollment of that destination, perhaps another employee's. A locked
+keyring is not taken for a missing token.
 
 **Identity and secrets.**
 
