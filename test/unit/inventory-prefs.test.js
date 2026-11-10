@@ -816,6 +816,45 @@ test('a call in progress keeps its row and its result when the list '
         .map(r => r.props.title), ['Head office', 'Branch']);
 });
 
+test('once hidden the page holds no settings handler, shown it holds one '
+    + 'of each', () => {
+    const count = () => settings.handlers.length;
+    const before = count();
+    const p = page();
+    p.emit('unmap');
+    assert.equal(count(), before, 'unmap disconnects every handler');
+    for (let i = 0; i < 3; i++) {
+        p.emit('map');
+        const signals = settings.handlers.slice(before).map(h => h.signal)
+            .sort();
+        assert.deepEqual(signals, ['changed::instances',
+            'changed::inventory-destinations']);
+        p.emit('unmap');
+        assert.equal(count(), before);
+    }
+});
+
+test('every row of the page shows its text as typed, without markup',
+    async () => {
+        setDestinations([dest({label: 'Lab & <test>'})]);
+        settings.set_string('instances', JSON.stringify([
+            {id: 'i1', name: 'Local & test', url: 'http://localhost:8069'}]));
+        const p = page();
+        const rowsNow = () => tree(p).filter(w => /^Adw\..*Row$/.test(w.kind));
+        const rows = new Set(rowsNow());
+        const remove = find(p, 'Gtk.Button', 'Remove');
+        remove.emit('clicked');
+        remove.emit('clicked');
+        await settle(40);
+        for (const w of rowsNow()) rows.add(w);
+        assert.ok(rows.size > 12, `${rows.size} rows`);
+        assert.ok(showing(p, 'Destination removed.').length, 'the notice');
+        for (const w of rows) {
+            assert.equal(w.props.use_markup, false,
+                `${w.kind} "${texts(w).join(' / ')}"`);
+        }
+    });
+
 test('the statuses refresh every POLL_S while the page is shown', async () => {
     setDestinations([dest()]);
     const p = page();

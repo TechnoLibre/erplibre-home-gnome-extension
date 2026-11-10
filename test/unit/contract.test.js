@@ -18,8 +18,9 @@ import {projectRootFrom, STREAMDECK_PYTHON_REL, GALLERY_SERVER_REL}
 import {GALLERY_ACTION_HEADER} from '../../lib/gallery-launch.js';
 import {INVENTORY_PROTOCOL, HEARTBEAT_S, TIMEOUT_S, QUEUE_MAX,
     QUEUE_MAX_AGE_DAYS, ENROLL_PATH, REPORT_PATH, UNENROLL_PATH,
-    ENROLL_METHODS, ERROR_CODES, buildState, diffDecks}
-    from '../../lib/inventory.js';
+    ENROLL_METHODS, ERROR_CODES, buildState, diffDecks,
+    workstationFingerprint} from '../../lib/inventory.js';
+import {createHmac} from 'node:crypto';
 
 const ROOT = new URL('../../', import.meta.url);
 
@@ -360,4 +361,79 @@ test('the inventory section states where the workstation keeps its part',
         assert.ok(inv.includes('`inventory-destinations`'));
         assert.ok(text('schemas/org.gnome.shell.extensions.erplibre-home'
             + '.gschema.xml').includes('<key name="inventory-destinations"'));
+    });
+
+// The "- `start`…" item of section `title`, white space folded: the
+// statements below are checked where they belong, not anywhere in the
+// section, since several routes share a code or a key.
+function item(title, start) {
+    const found = section(title).split(/\n(?=- |\n)/)
+        .filter((b) => b.startsWith(`- ${start}`));
+    assert.equal(found.length, 1, `item ${start}: ${found.length}`);
+    return found[0].replace(/\s+/g, ' ');
+}
+
+// What Odoo's routes do with each name, as the wire contract fixes it: a
+// changed sentence here is a protocol change, made on both sides at once.
+const WIRE_FACTS = [
+    [`\`POST ${ENROLL_PATH}\``, [
+        'body `protocol`, `method`, `fingerprint`, `hostname`',
+        '`code` for `pairing_code`', '`key` for `api_key`',
+        '`login` and `password` for `password`',
+        'Reply 200: `workstation_id`, `token`',
+        '400 `bad_request` or `protocol_unsupported`',
+        '401 `credentials_refused` (wrong, expired or used)',
+        '403 `user_inactive`',
+        'The same user and fingerprint enrolling again keep their '
+            + 'workstation, whose token is replaced']],
+    [`\`POST ${REPORT_PATH}\``, [
+        'header `Authorization: Bearer <token>`',
+        'body `protocol`, `state`, `events`, `lost_events`',
+        'Reply 200: `accepted`, the uuids of the events stored or already '
+            + 'known, and `heartbeat_s`',
+        '401 `token_invalid` (unknown or revoked token)',
+        '403 `user_inactive`', '400 `bad_request` or `protocol_unsupported`']],
+    [`\`POST ${UNENROLL_PATH}\``, [
+        'the same header, body `protocol`',
+        'reply 200 once the token is revoked']],
+    ['`state`', ['`usb_product_id` (4 lowercase hex digits)',
+        'A deck of the workstation that `decks` does not list becomes '
+            + 'disconnected']],
+    ['`events`', ['`at` (ISO 8601 in UTC, when the extension saw it)',
+        'Odoo keeps one event per uuid']],
+    ['`lost_events`', ['the running total of events the destination\'s '
+        + 'queue dropped unsent', 'Odoo keeps the largest total it received']],
+    ['`fingerprint`', ['the HMAC-SHA256, keyed by `<uid>|<url>|<db>` (the '
+        + 'URL without its trailing slashes), of the stripped content of '
+        + '`/etc/machine-id`, in 64 lowercase hex characters']],
+    ['`token`', ['base64url of 32 random bytes, 43 characters; Odoo keeps '
+        + 'only its SHA-256']],
+];
+
+test('the inventory section states what the wire contract fixes, where it '
+    + 'applies', () => {
+    for (const [start, facts] of WIRE_FACTS) {
+        const text = item('Odoo inventory', start);
+        for (const fact of facts)
+            assert.ok(text.includes(fact), `${start}: ${fact}`);
+    }
+    const inv = section('Odoo inventory').replace(/\s+/g, ' ');
+    assert.ok(inv.includes('Odoo answers an unknown MAJOR with 400 '
+        + '`protocol_unsupported`, accepts a newer MINOR and ignores the '
+        + 'keys it does not know'));
+});
+
+test('the fingerprint and the token are what the inventory section says',
+    () => {
+        const text = item('Odoo inventory', '`fingerprint`');
+        const template = text.match(/keyed by `([^`]+)`/)[1];
+        const key = template.replace('<uid>', '1000')
+            .replace('<url>', 'https://odoo.example.invalid')
+            .replace('<db>', 'base');
+        const hmac = (k, m) => createHmac('sha256', k).update(m)
+            .digest('hex');
+        assert.equal(workstationFingerprint({machineId: ' 0123abcd\n',
+            uid: 1000, url: 'https://odoo.example.invalid//', db: 'base'},
+        hmac), hmac(key, '0123abcd'));
+        assert.equal(Buffer.alloc(32).toString('base64url').length, 43);
     });

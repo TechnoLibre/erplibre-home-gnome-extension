@@ -532,7 +532,9 @@ export default class ERPLibreHomePrefs extends ExtensionPreferences {
      * form that adds one. All of it goes through `inventory`
      * (lib/inventory-prefs.js). While the page is shown, the statuses are
      * read again every POLL_S seconds and the page follows the settings;
-     * once hidden it holds no timer and no settings handler.
+     * once hidden it holds no timer and no settings handler. Every row
+     * has `use_markup: false`: names, URLs and translations show as
+     * written, an `&` included.
      */
     _buildInventoryPage(settings, inventory = new InventoryPrefs({settings})) {
         const page = new Adw.PreferencesPage({
@@ -641,7 +643,6 @@ export default class ERPLibreHomePrefs extends ExtensionPreferences {
      * `{widget, refresh, detach}`.
      */
     _inventoryRow(inventory, dest, tell) {
-        // The title and subtitles carry what the user typed: no markup.
         const row = new Adw.ExpanderRow({title: dest.label,
             subtitle: `${dest.url} · ${dest.db}`, use_markup: false});
         const status = new Adw.ActionRow({title: _('Not enrolled'),
@@ -656,13 +657,17 @@ export default class ERPLibreHomePrefs extends ExtensionPreferences {
             title: _('Enrollment method'),
             subtitle: _('Odoo gives a pairing code under Stream Deck › My '
                 + 'workstations › Add a workstation.'),
-            model: methods,
+            model: methods, use_markup: false,
         });
         row.add_row(method);
-        const code = new Adw.EntryRow({title: _('Pairing code')});
-        const key = new Adw.PasswordEntryRow({title: _('API key')});
-        const login = new Adw.EntryRow({title: _('Login')});
-        const password = new Adw.PasswordEntryRow({title: _('Password')});
+        const code = new Adw.EntryRow({title: _('Pairing code'),
+            use_markup: false});
+        const key = new Adw.PasswordEntryRow({title: _('API key'),
+            use_markup: false});
+        const login = new Adw.EntryRow({title: _('Login'),
+            use_markup: false});
+        const password = new Adw.PasswordEntryRow({title: _('Password'),
+            use_markup: false});
         const fields = [[code], [key], [login, password]];
         for (const w of fields.flat()) row.add_row(w);
         const showMethod = () => {
@@ -690,7 +695,8 @@ export default class ERPLibreHomePrefs extends ExtensionPreferences {
             valign: Gtk.Align.CENTER});
         const remove = new Gtk.Button({label: _('Remove'),
             valign: Gtk.Align.CENTER, css_classes: ['destructive-action']});
-        const actions = new Adw.ActionRow({title: _('Enrollment')});
+        const actions = new Adw.ActionRow({title: _('Enrollment'),
+            use_markup: false});
         for (const b of [enroll, unenroll, remove]) actions.add_suffix(b);
         row.add_row(actions);
         row.add_row(message);
@@ -795,15 +801,19 @@ export default class ERPLibreHomePrefs extends ExtensionPreferences {
             description: _('Plain HTTP is accepted only to this machine (a '
                 + 'local instance, an SSH tunnel); use https anywhere else.'),
         });
-        const source = new Adw.ComboRow({title: _('Odoo instance')});
-        const url = new Adw.EntryRow({title: _('URL (https://…)')});
-        const db = new Adw.EntryRow({title: _('Database')});
-        const label = new Adw.EntryRow({title: _('Name (optional)')});
+        const source = new Adw.ComboRow({title: _('Odoo instance'),
+            use_markup: false});
+        const url = new Adw.EntryRow({title: _('URL (https://…)'),
+            use_markup: false});
+        const db = new Adw.EntryRow({title: _('Database'), use_markup: false});
+        const label = new Adw.EntryRow({title: _('Name (optional)'),
+            use_markup: false});
         const message = new Adw.ActionRow({title: '', use_markup: false,
             visible: false});
         const addButton = new Gtk.Button({label: _('Add'),
             valign: Gtk.Align.CENTER, css_classes: ['suggested-action']});
-        const addRow = new Adw.ActionRow({title: _('Add this destination')});
+        const addRow = new Adw.ActionRow({title: _('Add this destination'),
+            use_markup: false});
         addRow.add_suffix(addButton);
         for (const w of [source, url, db, label, addRow, message])
             group.add(w);
