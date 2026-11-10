@@ -427,6 +427,93 @@ glib-compile-schemas --strict --dry-run schemas/
 checks that the extension becomes active, answers on D-Bus and mounts
 every indicator. `test/manual.md` is the manual checklist.
 
+<!-- [fr] -->
+`test/e2e_nested.sh` lance un GNOME Shell sans écran sur un bus privé et
+vérifie que l'extension devient active, répond sur D-Bus et monte chaque
+indicateur. `test/manual.md` est la liste de vérification manuelle.
+
+<!-- [end] -->
+<!-- [en] -->
+### Verdicts in the requirement registry
+
+`npm test` can send the verdict of each test to the requirement registry
+of an Odoo instance that has the `erplibre_devops_requirement` module. A
+requirement proved by a test of this repository lists a *Node test* line
+with the reference
+`erplibre-home-gnome-extension:test/unit/<file>::<test name>`, or a
+*Repository unit test* line with the reference
+`erplibre-home-gnome-extension:test/python/<file>::<Class>::<method>`.
+After the suites, `test/run_suites.py` writes the verdict of each
+declared reference that ran, one call per reference; a test that no
+requirement cites costs no call. A declared test missing from a file
+that ran to the end is noted as an error: it was renamed or deleted, and
+its reference is to update.
+
+Four environment variables turn it on, all four or none. The login is a
+user of the *Requirement test runner* group, and the key is that user's
+API key. `read -rs` reads the key without showing it and keeps it out of
+the shell history:
+
+<!-- [fr] -->
+### Verdicts dans le registre des requis
+
+`npm test` peut envoyer le verdict de chaque test au registre des requis
+d'une instance Odoo qui porte le module `erplibre_devops_requirement`. Un
+requis prouvé par un test de ce dépôt liste une ligne *Test Node* avec la
+référence
+`erplibre-home-gnome-extension:test/unit/<fichier>::<nom du test>`, ou une
+ligne *Test unitaire de dépôt* avec la référence
+`erplibre-home-gnome-extension:test/python/<fichier>::<Classe>::<méthode>`.
+Après les suites, `test/run_suites.py` écrit le verdict de chaque
+référence déclarée qui a tourné, avec un appel par référence ; un test
+qu'aucun requis ne cite ne coûte aucun appel. Un test déclaré absent d'un
+fichier qui a tourné jusqu'au bout est noté en erreur : il a été renommé
+ou supprimé, et sa référence est à mettre à jour.
+
+Quatre variables d'environnement l'activent, les quatre ou aucune.
+L'identifiant est un utilisateur du groupe *Lanceur de tests de requis*,
+et la clé est la clé d'API de cet utilisateur. `read -rs` lit la clé sans
+l'afficher et la garde hors de l'historique du shell :
+
+<!-- [end] -->
+<!-- [common] -->
+```bash
+export ERPLIBRE_REQUIREMENT_URL=https://odoo.example.com
+export ERPLIBRE_REQUIREMENT_DB=registry
+export ERPLIBRE_REQUIREMENT_LOGIN=test_runner
+read -rs ERPLIBRE_REQUIREMENT_KEY && export ERPLIBRE_REQUIREMENT_KEY
+npm test
+```
+
+<!-- [end] -->
+<!-- [en] -->
+The URL must be HTTPS. Plain HTTP is accepted only for a loopback
+address, such as an SSH tunnel to the instance, because the key travels
+with every call. The suites themselves do not receive these variables.
+Each sent log has the key masked, paths relative to the repository, and
+the home directory shown as `~`.
+
+Without these variables, `npm test` runs the two commands above as they
+are, opens no connection and prints nothing more. With them, the output
+is the same plus one line. A failed send prints one warning line and
+stops. The exit code is always the suites' own, and the key is never
+printed.
+
+<!-- [fr] -->
+L'URL doit être en HTTPS. HTTP sans chiffrement n'est accepté que vers
+une adresse de bouclage, comme un tunnel SSH vers l'instance, parce que
+la clé part avec chaque appel. Les suites elles-mêmes ne reçoivent pas
+ces variables. Chaque journal envoyé a la clé masquée, les chemins
+relatifs au dépôt et le répertoire personnel affiché `~`.
+
+Sans ces variables, `npm test` lance les deux commandes ci-dessus telles
+quelles, n'ouvre aucune connexion et n'affiche rien de plus. Avec elles,
+la sortie est la même, plus une ligne. Un envoi qui échoue affiche une
+ligne d'avertissement et s'arrête. Le code de sortie est toujours celui
+des suites, et la clé n'est jamais affichée.
+
+<!-- [end] -->
+<!-- [en] -->
 ## Internationalisation
 
 The extension ships English (source) and French translations. GNOME
@@ -446,10 +533,6 @@ translate every `msgstr "…"`, compile it with the `msgfmt` loop of
 system locale matches.
 
 <!-- [fr] -->
-`test/e2e_nested.sh` lance un GNOME Shell sans écran sur un bus privé et
-vérifie que l'extension devient active, répond sur D-Bus et monte chaque
-indicateur. `test/manual.md` est la liste de vérification manuelle.
-
 ## Internationalisation
 
 L'extension est livrée en anglais (source) et en français. GNOME

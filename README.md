@@ -207,6 +207,46 @@ glib-compile-schemas --strict --dry-run schemas/
 checks that the extension becomes active, answers on D-Bus and mounts
 every indicator. `test/manual.md` is the manual checklist.
 
+### Verdicts in the requirement registry
+
+`npm test` can send the verdict of each test to the requirement registry
+of an Odoo instance that has the `erplibre_devops_requirement` module. A
+requirement proved by a test of this repository lists a *Node test* line
+with the reference
+`erplibre-home-gnome-extension:test/unit/<file>::<test name>`, or a
+*Repository unit test* line with the reference
+`erplibre-home-gnome-extension:test/python/<file>::<Class>::<method>`.
+After the suites, `test/run_suites.py` writes the verdict of each
+declared reference that ran, one call per reference; a test that no
+requirement cites costs no call. A declared test missing from a file
+that ran to the end is noted as an error: it was renamed or deleted, and
+its reference is to update.
+
+Four environment variables turn it on, all four or none. The login is a
+user of the *Requirement test runner* group, and the key is that user's
+API key. `read -rs` reads the key without showing it and keeps it out of
+the shell history:
+
+```bash
+export ERPLIBRE_REQUIREMENT_URL=https://odoo.example.com
+export ERPLIBRE_REQUIREMENT_DB=registry
+export ERPLIBRE_REQUIREMENT_LOGIN=test_runner
+read -rs ERPLIBRE_REQUIREMENT_KEY && export ERPLIBRE_REQUIREMENT_KEY
+npm test
+```
+
+The URL must be HTTPS. Plain HTTP is accepted only for a loopback
+address, such as an SSH tunnel to the instance, because the key travels
+with every call. The suites themselves do not receive these variables.
+Each sent log has the key masked, paths relative to the repository, and
+the home directory shown as `~`.
+
+Without these variables, `npm test` runs the two commands above as they
+are, opens no connection and prints nothing more. With them, the output
+is the same plus one line. A failed send prints one warning line and
+stops. The exit code is always the suites' own, and the key is never
+printed.
+
 ## Internationalisation
 
 The extension ships English (source) and French translations. GNOME

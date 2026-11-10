@@ -7,6 +7,15 @@ migrations that are not auto-applied.
 
 ## [Unreleased]
 
+### Added
+- `npm test` can send each test's verdict to the requirement registry of
+  an Odoo instance (module `erplibre_devops_requirement`), when the four
+  `ERPLIBRE_REQUIREMENT_*` variables are set: references
+  `erplibre-home-gnome-extension:test/unit/<file>::<test name>` (kind
+  `node_test`) and `…:test/python/<file>::<Class>::<method>` (kind
+  `repo_unittest`). `npm test` now starts `test/run_suites.py`, which runs
+  the same two commands, unchanged without the variables.
+
 ### Changed
 - The extension lives in its own repository,
   `TechnoLibre/erplibre-home-gnome-extension`, with the history of its
