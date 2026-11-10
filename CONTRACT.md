@@ -221,8 +221,9 @@ route.
   one; `deck_program`; `service_state`, one of `active`, `failed`,
   `inactive`, `absent`; `decks`, the decks connected now, each with
   `serial`, `usb_product_id` (4 lowercase hex digits), `usb_path` and
-  `firmware`. Unknown values are null. A deck of the workstation that
-  `decks` does not list becomes disconnected.
+  `firmware`. Unknown values are null, and so is a serial outside
+  `[A-Za-z0-9._-]{1,64}`, which Odoo refuses. A deck of the workstation
+  that `decks` does not list becomes disconnected.
 - `events`: the events not acknowledged yet, oldest first, each with
   `uuid`, `kind` (`plugged`, `unplugged` or `service_changed`), `at`
   (ISO 8601 in UTC, when the extension saw it), `serial`,

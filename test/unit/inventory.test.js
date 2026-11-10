@@ -225,6 +225,26 @@ test('buildState produces the wire state', () => {
     });
 });
 
+test('a serial outside Odoo\'s pattern goes as none, in the state and the events', () => {
+    const odd = ['nosn:7:0063:1-4', 'SN INVENTED', 'SN-É', 'x'.repeat(65),
+        'SN/INVENTED'];
+    for (const serial of odd) {
+        const deck = {serial, usb_product_id: '0063', usb_path: '1-4'};
+        const state = buildState({hostname: 'h', serviceState: 'active',
+            decks: [deck]});
+        assert.equal(state.decks[0].serial, null, serial);
+        assert.equal(deckKey(deck), 'nosn::0063:1-4', serial);
+        const [event] = diffDecks([], [deck], '2026-01-01T00:00:00.000Z',
+            () => 'u1');
+        assert.equal(event.serial, null, serial);
+    }
+    for (const serial of ['SN-INVENTED_1.2', 'A'.repeat(64)]) {
+        const state = buildState({hostname: 'h', serviceState: 'active',
+            decks: [{serial, usb_product_id: '0063', usb_path: '1-4'}]});
+        assert.equal(state.decks[0].serial, serial);
+    }
+});
+
 test('buildState: missing parts become null, no checkout is null', () => {
     const state = buildState({hostname: 'h', serviceState: 'absent'});
     assert.deepEqual(state, {
