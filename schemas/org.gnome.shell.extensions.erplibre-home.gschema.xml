@@ -81,6 +81,9 @@
     <!-- Device -->
     <key name="device-auto-refresh-sec"  type="i"><default>0</default><summary>Auto-refresh interval seconds; 0 disables</summary></key>
 
+    <!-- Inventory -->
+    <key name="inventory-destinations" type="s"><default>"[]"</default><summary>Odoo instances that receive the Stream Deck inventory (JSON array: id, label, url, db, source, instanceId); tokens live in the keyring, never here</summary></key>
+
     <!-- Theming -->
     <key name="icon-overrides" type="s"><default>"{}"</default><summary>Per-indicator icon overrides (JSON object)</summary></key>
 

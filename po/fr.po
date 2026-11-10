@@ -156,6 +156,18 @@ msgstr "(aucun Stream Deck détecté)"
 msgid "🔄 Re-scan USB"
 msgstr "🔄 Re-scan USB"
 
+msgid "Inventory: up to date"
+msgstr "Inventaire : à jour"
+
+msgid "Inventory: offline ({n} pending)"
+msgstr "Inventaire : hors ligne ({n} en attente)"
+
+msgid "Inventory: refused"
+msgstr "Inventaire : refusé"
+
+msgid "Inventory: enrollment revoked"
+msgstr "Inventaire : inscription révoquée"
+
 msgid "Status"
 msgstr "Statut"
 

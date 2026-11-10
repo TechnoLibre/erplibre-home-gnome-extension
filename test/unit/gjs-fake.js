@@ -30,6 +30,16 @@
  *   `fake.exported`; each Soup message records
  *   {method, uri, headers} in `fake.http`; each ModalDialog subclass
  *   instance lands in `fake.dialogs`.
+ * - A Soup message records its flags, its request body as text in `body`
+ *   and the cancellable it was sent with; `answer(message, {status, body,
+ *   error})` completes its send_and_read_async, `error` making the finish
+ *   throw.
+ * - Secret keeps passwords in memory, in `fake.secrets` keyed by schema
+ *   name and attributes; `fake.secretError` makes the next calls fail.
+ * - GUdev.Client lists `fake.udevDevices` (see `udevDevice`), records each
+ *   client in `fake.udevClients`, and `fake.udevEmit(action, device)` runs
+ *   their `uevent` handlers; `fake.udevMissing` makes the constructor
+ *   throw, as a missing typelib does.
  * - Anything else is loose: any property, call or `new` of it gives another
  *   loose value, so widget-building code runs without being asserted on.
  *
@@ -39,6 +49,7 @@
 
 import {registerHooks} from 'node:module';
 import {spawnSync} from 'node:child_process';
+import {randomUUID} from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -117,6 +128,16 @@ export const fake = {
     exported: [],
     http: [],
     dialogs: [],
+    secrets: new Map(),
+    secretError: null,
+    udevDevices: [],
+    udevClients: [],
+    udevMissing: false,
+    udevEmit(action, device) {
+        for (const c of this.udevClients)
+            for (const h of c.handlers.filter(x => x.signal === 'uevent'))
+                h.cb(c, action, device);
+    },
     settings: null,
     root: '',
     env: {},
@@ -131,6 +152,11 @@ export const fake = {
             this[k] = [];
         this.onSpawn = () => ({});
         this.programs = [];
+        this.secrets = new Map();
+        this.secretError = null;
+        this.udevDevices = [];
+        this.udevClients = [];
+        this.udevMissing = false;
         this.settings = null;
         const {root, env} = freshEnv();
         this.root = root;
@@ -216,6 +242,8 @@ const GLib = looseObject({
     get_user_config_dir: () => fake.env.XDG_CONFIG_HOME,
     get_user_cache_dir: () => fake.env.XDG_CACHE_HOME,
     get_user_runtime_dir: () => fake.env.XDG_RUNTIME_DIR,
+    get_user_state_dir: () => fake.env.XDG_STATE_HOME,
+    uuid_string_random: () => randomUUID(),
     get_tmp_dir: () => fake.root,
     get_user_name: () => fake.env.USER,
     get_host_name: () => fake.env.HOSTNAME,
@@ -243,7 +271,7 @@ const GLib = looseObject({
 // ----------------------------------------------------------------- Gio
 
 const SubprocessFlags = {NONE: 0, STDIN_PIPE: 1, STDOUT_PIPE: 2,
-    STDERR_PIPE: 4};
+    STDERR_PIPE: 4, STDERR_SILENCE: 8};
 
 function newSubprocess(argv, flags) {
     const record = {argv: [...argv], flags, stdin: null};
@@ -307,6 +335,43 @@ class FakeFile {
     }
     monitor_directory() { return loose(); }
     monitor_file() { return loose(); }
+    // The *_async calls complete on a later turn, like GLib's main loop;
+    // `res` carries the outcome to the matching *_finish.
+    _later(cb, work) {
+        let res;
+        try { res = {value: work()}; } catch (e) { res = {error: e}; }
+        setImmediate(() => cb?.(this, res));
+    }
+    _finish(res) {
+        if (res.error) throw res.error;
+        return res.value;
+    }
+    load_contents_async(_c, cb) {
+        this._later(cb, () => [true, new Uint8Array(fs.readFileSync(this._p)),
+            null]);
+    }
+    load_contents_finish(res) { return this._finish(res); }
+    replace_contents_bytes_async(bytes, _etag, _backup, flags, _c, cb) {
+        this._later(cb, () => {
+            const tmp = `${this._p}.fake-tmp`;
+            fs.writeFileSync(tmp, bytes.get_data(),
+                {mode: flags & Gio.FileCreateFlags.PRIVATE ? 0o600 : 0o666});
+            fs.renameSync(tmp, this._p);
+            return [true, null];
+        });
+    }
+    replace_contents_finish(res) { return this._finish(res); }
+    make_directory_async(_prio, _c, cb) {
+        this._later(cb, () => { fs.mkdirSync(this._p); return true; });
+    }
+    make_directory_finish(res) { return this._finish(res); }
+    query_info_async(_attrs, _flags, _prio, _c, cb) {
+        this._later(cb, () => {
+            const target = fs.readlinkSync(this._p);
+            return {get_symlink_target: () => target};
+        });
+    }
+    query_info_finish(res) { return this._finish(res); }
 }
 
 class Cancellable {
@@ -318,7 +383,7 @@ const Gio = looseObject({
     SubprocessFlags,
     Subprocess: looseObject({new: newSubprocess}),
     File: looseObject({new_for_path: p => new FakeFile(p)}),
-    FileCreateFlags: {NONE: 0, REPLACE_DESTINATION: 1},
+    FileCreateFlags: {NONE: 0, REPLACE_DESTINATION: 1, PRIVATE: 2},
     FileQueryInfoFlags: {NONE: 0, NOFOLLOW_SYMLINKS: 1},
     Cancellable,
     icon_new_for_string: s => ({icon: s}),
@@ -380,9 +445,15 @@ const St = new Proxy({
 // ---------------------------------------------------------------- Soup
 
 class SoupSession {
-    send_and_read_async(message, _prio, _c, cb) {
+    constructor(props = {}) {
+        this.props = props;
+        this.features = [];
+    }
+    add_feature(feature) { this.features.push(feature); }
+    send_and_read_async(message, _prio, c, cb) {
         message.callback = cb;
         message.session = this;
+        message.cancellable = c;
     }
     send_and_read_finish(result) {
         if (result?.error) throw new Error(result.error);
@@ -390,8 +461,18 @@ class SoupSession {
     }
 }
 
+/** Completes the send of a fake Soup `message`, as the server's answer. */
+export function answer(message, {status = 200, body = '', error = null} = {}) {
+    message.status = status;
+    message.callback(message.session, {body, error});
+}
+
+class CookieJar {}
+
 const Soup = looseObject({
     Session: SoupSession,
+    CookieJar,
+    MessageFlags: {NO_REDIRECT: 2},
     Message: {
         new(method, uri) {
             const headers = {};
@@ -401,12 +482,115 @@ const Soup = looseObject({
                     append: (k, v) => { headers[k] = v; },
                 }),
                 get_status: () => message.status,
+                flags: 0,
+                body: null,
+                contentType: null,
+                set_flags: f => { message.flags = f; },
+                set_request_body_from_bytes: (type, bytes) => {
+                    message.contentType = type;
+                    message.body = new TextDecoder().decode(bytes.get_data());
+                },
             };
             fake.http.push(message);
             return message;
         },
     },
 });
+
+// -------------------------------------------------------------- Secret
+
+class SecretSchema {
+    constructor(name, flags, attributes) {
+        this.name = name;
+        this.flags = flags;
+        this.attributes = attributes;
+    }
+}
+
+function secretKey(schema, attrs) {
+    const sorted = Object.keys(attrs).sort().map(k => [k, attrs[k]]);
+    return `${schema.name}|${JSON.stringify(sorted)}`;
+}
+
+function secretLater(cb, work) {
+    let res;
+    try {
+        if (fake.secretError) throw new Error(fake.secretError);
+        res = {value: work()};
+    } catch (e) {
+        res = {error: e};
+    }
+    setImmediate(() => cb?.(null, res));
+}
+
+function secretFinish(res) {
+    if (res.error) throw res.error;
+    return res.value;
+}
+
+const Secret = looseObject({
+    Schema: SecretSchema,
+    SchemaFlags: {NONE: 0},
+    SchemaAttributeType: {STRING: 0},
+    COLLECTION_DEFAULT: 'default',
+    password_lookup(schema, attrs, _c, cb) {
+        secretLater(cb,
+            () => fake.secrets.get(secretKey(schema, attrs))?.password ?? null);
+    },
+    password_lookup_finish: secretFinish,
+    password_store(schema, attrs, collection, label, password, _c, cb) {
+        secretLater(cb, () => {
+            fake.secrets.set(secretKey(schema, attrs),
+                {schema: schema.name, attrs: {...attrs}, collection, label,
+                    password});
+            return true;
+        });
+    },
+    password_store_finish: secretFinish,
+    password_clear(schema, attrs, _c, cb) {
+        secretLater(cb, () => fake.secrets.delete(secretKey(schema, attrs)));
+    },
+    password_clear_finish: secretFinish,
+});
+
+// --------------------------------------------------------------- GUdev
+
+/**
+ * A GUdev.Device stand-in: `name` the kernel name (`1-2.3`), `attrs` its
+ * sysfs attributes (idVendor, idProduct, serial…), devtype usb_device.
+ */
+export function udevDevice(name, attrs, devtype = 'usb_device') {
+    return {
+        get_name: () => name,
+        get_devtype: () => devtype,
+        get_subsystem: () => 'usb',
+        get_sysfs_attr: k => attrs[k] ?? null,
+    };
+}
+
+class UdevClient {
+    constructor(props = {}) {
+        if (fake.udevMissing) throw new Error('Typelib GUdev not found');
+        this.props = props;
+        this.handlers = [];
+        this.queries = 0;
+        fake.udevClients.push(this);
+    }
+    query_by_subsystem(subsystem) {
+        this.queries++;
+        return subsystem === 'usb' ? [...fake.udevDevices] : [];
+    }
+    connect(signal, cb) {
+        const id = this.handlers.length + 1;
+        this.handlers.push({id, signal, cb});
+        return id;
+    }
+    disconnect(id) {
+        this.handlers = this.handlers.filter(h => h.id !== id);
+    }
+}
+
+const GUdev = looseObject({Client: UdevClient});
 
 // ------------------------------------------------------- shell modules
 
@@ -516,10 +700,11 @@ const RESOURCES = {
     },
     'resource:///org/gnome/shell/ui/modalDialog.js': {ModalDialog},
     'resource:///org/gnome/shell/extensions/extension.js': {Extension},
+    'resource:///org/gnome/shell/misc/config.js': {PACKAGE_VERSION: '48.0'},
 };
 
 const GI = {
-    Gio, GLib, GObject, St, Soup,
+    Gio, GLib, GObject, St, Soup, Secret, GUdev,
     Clutter: loose(), Meta: loose(), Shell: loose(), Gtk: loose(),
     Adw: loose(),
 };

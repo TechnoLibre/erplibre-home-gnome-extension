@@ -2,7 +2,7 @@ import {test, beforeEach, afterEach} from 'node:test';
 import assert from 'node:assert/strict';
 import {existsSync, mkdirSync, readFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {fake, makeSettings, settle} from './gjs-fake.js';
+import {fake, makeSettings, settle, udevDevice} from './gjs-fake.js';
 
 // After gjs-fake.js: extension.js imports gi:// modules statically.
 const {default: ERPLibreHomeExtension} = await import('../../extension.js');
@@ -247,4 +247,42 @@ test('a settings change is written 5 s later, on a single timer', async () => {
     const written = JSON.parse(
         readFileSync(join(repo, 'erplibre-home.json'), 'utf8'));
     assert.equal(written.settings.paths, '[{"path": "/b"}]');
+});
+
+test('the inventory service runs from enable to disable', async () => {
+    // GUdev drives it; the device indicator and ListDevices read its decks.
+    fake.udevDevices = [udevDevice('1-2', {idVendor: '0fd9',
+        idProduct: '0084', serial: 'SN-INVENTED-1', product: 'Stream Deck +',
+        busnum: '1', devnum: '4'})];
+    await enabled();
+    assert.equal(fake.udevClients.length, 1);
+    assert.equal(fake.udevClients[0].handlers.length, 1);
+    const decks = JSON.parse(fake.exported[0].object.ListDevices());
+    assert.deepEqual(decks.map(d => [d.serial, d.usb_path, d.bus, d.device]),
+        [['SN-INVENTED-1', '1-2', '001', '004']]);
+    assert.ok(mounted('device').menu.items.some(i =>
+        i.text === 'Stream Deck + (SN-INVENTED-1)'));
+    // No synchronous spawn: the shell never waits on lsusb.
+    assert.ok(!fake.spawned.some(s => s.argv[0] === '__sync__'));
+    ext.disable();
+    ext = null;
+    assert.equal(fake.udevClients[0].handlers.length, 0);
+});
+
+test('a destination with a token gets a report once enabled', async () => {
+    fake.secrets.set(
+        'ca.technolibre.erplibre-home.inventory|[["destination","d1"]]',
+        {password: 'TOKEN-INVENTED'});
+    fake.onSpawn = argv => (argv[0] === 'systemctl'
+        ? {stdout: 'LoadState=not-found\nActiveState=inactive\n'} : {});
+    await enabled({'inventory-destinations': JSON.stringify([{id: 'd1',
+        url: 'https://odoo.example.invalid', db: 'base1'}])});
+    await settle(60);
+    const login = fake.http.find(m => m.method === 'GET');
+    assert.equal(login?.uri,
+        'https://odoo.example.invalid/web/login?db=base1');
+    ext.disable();
+    ext = null;
+    assert.equal(login.cancellable.is_cancelled(), true,
+        'disable cancels the call in flight');
 });

@@ -154,6 +154,18 @@ msgstr ""
 msgid "🔄 Re-scan USB"
 msgstr ""
 
+msgid "Inventory: up to date"
+msgstr ""
+
+msgid "Inventory: offline ({n} pending)"
+msgstr ""
+
+msgid "Inventory: refused"
+msgstr ""
+
+msgid "Inventory: enrollment revoked"
+msgstr ""
+
 msgid "Status"
 msgstr ""
 
