@@ -101,7 +101,9 @@ test('urlAllowed refuses what is not an absolute URL', () => {
         'https://[::1', 'http://localhost\\.example.invalid',
         'https://odoo.example.invalid/a b',
         'https://odoo.example.invalid/a\\b',
-        'https://odoo.example.invalid/\t']) {
+        'https://odoo.example.invalid/\t',
+        'http://[0:0:0:0::0:0:0:1]', 'http://[1:2:3:4:5::6:7:8:9]',
+        'https://[1:2:3:4:5:6:7:8:9]', 'https://[1::2::3]']) {
         assert.deepEqual(urlAllowed(url), {ok: false, reason: 'invalid'},
             String(url));
     }
@@ -154,6 +156,16 @@ test('workstationFingerprint refuses an empty machine-id or a bad digest',
         assert.throws(() => workstationFingerprint(
             {...args, machineId: 'abc'}, () => 'A'.repeat(64)));
     });
+
+test('workstationFingerprint refuses an empty or missing url or db', () => {
+    const args = {machineId: 'abc', uid: 1000,
+        url: 'https://odoo.example.invalid', db: 'a'};
+    for (const bad of [{url: ''}, {db: ''}, {url: undefined},
+        {db: undefined}, {db: 7}]) {
+        assert.throws(() => workstationFingerprint({...args, ...bad}, hmac),
+            /url and db/, JSON.stringify(bad));
+    }
+});
 
 // --- parseOsRelease ---
 
@@ -224,6 +236,15 @@ test('buildState: missing parts become null, no checkout is null', () => {
         erplibre: {branch: '', commit: ''}}).erplibre, null);
 });
 
+test('buildState: a checkout with only a branch or a commit is kept', () => {
+    const state = erplibre => buildState({hostname: 'h',
+        serviceState: 'active', erplibre}).erplibre;
+    assert.deepEqual(state({branch: 'main', commit: ''}),
+        {branch: 'main', commit: null});
+    assert.deepEqual(state({commit: 'abc123'}),
+        {branch: null, commit: 'abc123'});
+});
+
 test('buildState refuses a service state outside the contract', () => {
     assert.throws(() => buildState({hostname: 'h', serviceState: 'running'}),
         RangeError);
@@ -286,6 +307,7 @@ test('serviceChanged emits one event when the service state changes', () => {
     ]);
     assert.deepEqual(serviceChanged('active', 'active', now, counter()), []);
     assert.deepEqual(serviceChanged(null, 'active', now, counter()), []);
+    assert.deepEqual(serviceChanged(undefined, 'active', now, counter()), []);
 });
 
 // --- EventQueue ---
@@ -306,6 +328,15 @@ test('EventQueue ignores a uuid already queued', () => {
     q.push(event('a'));
     q.push(event('a'));
     assert.equal(q.pending().length, 1);
+});
+
+test('EventQueue refuses an event without a string date', () => {
+    const q = new EventQueue();
+    assert.equal(q.push({...event('a'), at: 1767960000000}), false);
+    assert.equal(q.push({...event('b'), at: undefined}), false);
+    assert.equal(q.push({...event('c'), kind: 'exploded'}), false);
+    assert.equal(q.push({...event('d'), uuid: ''}), false);
+    assert.deepEqual(q.pending(), []);
 });
 
 test('EventQueue pending() is a copy', () => {
@@ -430,6 +461,10 @@ test('parseReply bounds the heartbeat between a minute and a day', () => {
         .heartbeatS, 86400);
     assert.equal(parseReply(200, {accepted: [], heartbeat_s: 'x'})
         .heartbeatS, 900);
+    assert.equal(parseReply(200, {accepted: [], heartbeat_s: 600.4})
+        .heartbeatS, 600);
+    assert.equal(parseReply(200, {accepted: [], heartbeat_s: 600.6})
+        .heartbeatS, 601);
 });
 
 test('parseReply maps the contract error codes', () => {
@@ -453,7 +488,8 @@ test('parseReply: no answer or a server failure is network', () => {
 test('parseReply: an answer outside the contract is bad_reply', () => {
     for (const [status, json] of [[200, null], [200, {}],
         [200, {accepted: 'a'}], [200, {accepted: [1]}], [404, null],
-        [401, {error: 'nope'}], [400, 'text'], [302, null]]) {
+        [401, {error: 'nope'}], [400, 'text'], [302, null],
+        [201, {accepted: ['a']}], [204, {accepted: []}]]) {
         assert.deepEqual(parseReply(status, json),
             {ok: false, accepted: [], heartbeatS: 900, error: 'bad_reply'},
             `${status} ${JSON.stringify(json)}`);
