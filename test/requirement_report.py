@@ -291,9 +291,13 @@ class Registry:
         Every `file://` token is percent-decoded first, so the paths are
         matched in one form whatever set of characters the writer encoded:
         node's pathToFileURL keeps « + @ ( » and encodes « ~ », Python's
-        quote does the reverse. The key is replaced after the decoding."""
+        quote does the reverse. The key is replaced before the decoding,
+        which could rewrite a key holding a « %XX » sequence, and again
+        after it, which catches a key that was encoded in a URL."""
         if not log:
             return log
+        if self.key:
+            log = log.replace(self.key, "***")
         log = re.sub(
             r"file://\S+", lambda m: urllib.parse.unquote(m.group()), log
         )
