@@ -14,6 +14,12 @@ migrations that are not auto-applied.
   by Google Repo or by its installer, and follows `main`. `CONTRACT.md`
   (version 1.0) states what the extension and ERPLibre rely on from each
   other; `test/unit/contract.test.js` holds the extension's half.
+- `CONTRACT.md` 1.1 also states the keys of the `claude/`, `mpv/` and
+  `todo_terminals.json` records, the two journal lines ERPLibre's long
+  test reads and the commands that run the test suites; ERPLibre's tests
+  read from the clone only what the contract states.
+- The Claude hooks preferences name `hooks/install_claude_hooks.py`, which
+  a clone on its own has, before ERPLibre's `make claude_install_hooks`.
 - The tests run in a clone on their own: `npm test` runs the node suite
   and the Python tests of `tools/` and `hooks/`, moved from ERPLibre to
   `test/python/`. The controller path test runs only inside a checkout.
