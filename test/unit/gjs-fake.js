@@ -40,7 +40,10 @@
  * - Secret keeps passwords in memory, in `fake.secrets` keyed by schema
  *   name and attributes; lookup and clear match the items holding the
  *   given attributes, as libsecret does; `fake.secretError` makes the next
- *   calls fail.
+ *   calls fail. `fake.secretLocked` locks the default collection: a lookup
+ *   then finds nothing and does not fail, as libsecret answers when the
+ *   unlock prompt is dismissed; Secret.Collection.for_alias gives that
+ *   collection, null with `fake.secretNoDefault`.
  * - GUdev.Client lists `fake.udevDevices` (see `udevDevice`), records each
  *   client in `fake.udevClients`, and `fake.udevEmit(action, device)` runs
  *   their `uevent` handlers; `fake.udevMissing` makes the constructor
@@ -137,6 +140,8 @@ export const fake = {
     dialogs: [],
     secrets: new Map(),
     secretError: null,
+    secretLocked: false,
+    secretNoDefault: false,
     udevDevices: [],
     udevClients: [],
     udevMissing: false,
@@ -162,6 +167,8 @@ export const fake = {
         this.programs = [];
         this.secrets = new Map();
         this.secretError = null;
+        this.secretLocked = false;
+        this.secretNoDefault = false;
         this.udevDevices = [];
         this.udevClients = [];
         this.udevMissing = false;
@@ -591,9 +598,18 @@ const Secret = looseObject({
     SchemaFlags: {NONE: 0},
     SchemaAttributeType: {STRING: 0},
     COLLECTION_DEFAULT: 'default',
+    CollectionFlags: {NONE: 0},
     password_lookup(schema, attrs, _c, cb) {
-        secretLater(cb, () => [...fake.secrets.values()].find(item =>
-            secretMatches(schema, item, attrs))?.password ?? null);
+        secretLater(cb, () => (fake.secretLocked ? null
+            : [...fake.secrets.values()].find(item =>
+                secretMatches(schema, item, attrs))?.password ?? null));
+    },
+    Collection: {
+        for_alias(_service, alias, _flags, _c, cb) {
+            secretLater(cb, () => (alias !== 'default' || fake.secretNoDefault
+                ? null : {get_locked: () => fake.secretLocked}));
+        },
+        for_alias_finish: secretFinish,
     },
     password_lookup_finish: secretFinish,
     password_store(schema, attrs, collection, label, password, _c, cb) {

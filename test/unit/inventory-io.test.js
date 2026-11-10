@@ -392,6 +392,22 @@ test('a token is never looked up or stored without its URL and database',
         assert.equal(await secrets.lookupToken('d1', AT_ONE), 'TOK-1');
     });
 
+test('a locked keyring rejects instead of answering "no token"',
+    async () => {
+        // libsecret answers null, without an error, when the prompt that
+        // would unlock the collection is dismissed or cannot be shown.
+        await secrets.storeToken('d1', 'l', 'TOK-1', AT_ONE);
+        fake.secretLocked = true;
+        await assert.rejects(secrets.lookupToken('d1', AT_ONE), /locked/);
+        await assert.rejects(secrets.lookupToken('d2', AT_ONE), /locked/);
+        fake.secretLocked = false;
+        assert.equal(await secrets.lookupToken('d1', AT_ONE), 'TOK-1');
+        assert.equal(await secrets.lookupToken('d2', AT_ONE), null);
+        // Without a default collection no token can be stored: none.
+        fake.secretNoDefault = true;
+        assert.equal(await secrets.lookupToken('d2', AT_ONE), null);
+    });
+
 test('a keyring error rejects instead of answering "no token"', async () => {
     fake.secretError = 'collection is locked';
     await assert.rejects(secrets.lookupToken('d1', AT_ONE), /locked/);
