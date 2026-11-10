@@ -1,6 +1,6 @@
 # Contract between the extension and ERPLibre
 
-**Contract version: 1.0**
+**Contract version: 1.1**
 
 The extension runs on its own (see `README.md`). ERPLibre also clones this
 repository at `script/gnome-extension/erplibre_home/`, by Google Repo or by
@@ -46,6 +46,11 @@ check it.
 
    `dev_nested.sh` and `test/e2e_nested.sh` run a nested GNOME Shell for
    development; ERPLibre's make targets call them without arguments.
+
+   The test suites run from the repository root, as
+   `make test_gnome_extension` runs them in ERPLibre:
+   `node --test test/unit/*.test.js` and
+   `python3 -m unittest discover -s test/python`; `npm test` runs both.
 3. **D-Bus.** On the session bus name `org.gnome.Shell`, object
    `/org/gnome/Shell/Extensions/ERPLibreHome`, interface
    `org.gnome.Shell.Extensions.ERPLibreHome`. ERPLibre calls these methods,
@@ -81,13 +86,52 @@ check it.
    directory; ERPLibre's clean-up removes that prefix.
 5. **Shared directories**, `~` standing for an unset XDG variable as the
    XDG specification says:
-   - `$XDG_STATE_HOME/erplibre-home/`: `claude/` (written by
-     `hooks/erplibre-home-hook.py`), `mpv/`, `todo/` and
-     `todo_terminals.json`, read and written by both sides;
+   - `$XDG_STATE_HOME/erplibre-home/`: `claude/`, `mpv/` and
+     `todo_terminals.json`, which item 6 describes, and `todo/`, the logs
+     of the TODO terminals;
    - `$XDG_CACHE_HOME/erplibre-home/controller.pid`: written by ERPLibre's
      Stream Deck controller, read by the device indicator;
    - `$XDG_RUNTIME_DIR/erplibre-home/deck.lock`: text `<pid> <program>`,
      written by ERPLibre's deck lock, read by the extension.
+6. **Records** in `$XDG_STATE_HOME/erplibre-home/`, each JSON. A reader
+   takes a missing key as empty text or 0 and ignores the keys it does not
+   know; a writer may add keys.
+   - `claude/<session_id>.json`, one per Claude Code session: written by
+     `hooks/erplibre-home-hook.py` at each hook event and removed at the
+     end of the session, read by the extension and by ERPLibre's Stream
+     Deck. The latest of the four timestamps gives the session's status;
+     `description`, when empty, falls back to `last_prompt`.
+   - `mpv/<pid>.json`, one per mpv player the extension started: written
+     by the extension and removed when the player exits, read by
+     ERPLibre's Stream Deck.
+   - `todo_terminals.json`, an array with one entry per TODO terminal:
+     the extension and ERPLibre's Stream Deck each add their own entries
+     and rewrite the whole file.
+
+   | Record | Key | Type |
+   |---|---|---|
+   | `claude/*.json` | `session_id` | text, the file's name |
+   | `claude/*.json` | `pid` | integer, the Claude Code process, 0 when unknown |
+   | `claude/*.json` | `cwd` | text |
+   | `claude/*.json` | `description` | text |
+   | `claude/*.json` | `last_prompt` | text, first line of the last prompt |
+   | `claude/*.json` | `notification_message` | text, empty when none waits |
+   | `claude/*.json` | `ts_active` | integer, milliseconds since the epoch, 0 when never |
+   | `claude/*.json` | `ts_stop` | integer, milliseconds since the epoch, 0 when never |
+   | `claude/*.json` | `ts_notification` | integer, milliseconds since the epoch, 0 when never |
+   | `claude/*.json` | `ts_tool` | integer, milliseconds since the epoch, 0 when never |
+   | `mpv/*.json` | `pid` | integer, the mpv process |
+   | `mpv/*.json` | `started_at` | integer, milliseconds since the epoch |
+   | `mpv/*.json` | `title` | text |
+   | `mpv/*.json` | `url` | text |
+   | `todo_terminals.json` | `window_id` | text, the window's stable id in decimal |
+   | `todo_terminals.json` | `name` | text |
+   | `todo_terminals.json` | `opened_at` | number, seconds since the epoch |
+   | `todo_terminals.json` | `log_path` | text, empty when none |
+7. **Journal.** The extension writes `[ERPLibreHome] enabled` to the
+   session journal once enabled, and
+   `[ERPLibreHome] mount <id> failed: <reason>` when indicator `<id>`
+   fails to start; ERPLibre's long test reads these lines.
 
 ## What the extension relies on
 
@@ -123,11 +167,16 @@ check it.
 ## Versioning
 
 A change that a reader on the other side can see bumps MAJOR: a file or
-tool above renamed, moved or removed, a D-Bus method of the table removed,
-renamed or given other input arguments, a shared directory moved, a
-changed identity in `metadata.json` or the schema. An optional addition
-bumps MINOR. ERPLibre's tests fail when the MAJOR it records differs from
-this one. ERPLibre follows `main`: a MAJOR change is pushed on both sides
-together.
+tool above renamed, moved or removed, a test command of item 2 changed, a
+D-Bus method of the table removed, renamed or given other input
+arguments, a shared directory moved, a record key removed, renamed or
+given another type, a journal line reworded, a changed identity in
+`metadata.json` or the schema. An optional addition bumps MINOR.
+ERPLibre's tests fail when the MAJOR it records differs from this one.
+They read from this repository only what this file states, and the
+values it gives; the tests of this repository hold the code to them.
+ERPLibre follows `main`: a MAJOR change is pushed on both sides together.
 
+- **1.1:** the test commands, the records of the shared state files and
+  the journal lines are stated.
 - **1.0:** the first version.
