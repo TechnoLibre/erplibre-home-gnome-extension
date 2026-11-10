@@ -6,6 +6,6 @@
   "license": "AGPL-3.0-or-later",
   "repository": "github:TechnoLibre/erplibre-home-gnome-extension",
   "scripts": {
-    "test": "node --test test/unit/*.test.js && python3 -m unittest discover -s test/python"
+    "test": "python3 test/run_suites.py"
   }
 }
