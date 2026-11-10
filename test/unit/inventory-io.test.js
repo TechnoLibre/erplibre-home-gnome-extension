@@ -331,30 +331,71 @@ test('postJson never writes to the console', async () => {
 
 // --------------------------------------------------------- secret-store
 
+const AT_ONE = {url: 'https://odoo.example.invalid', db: 'base1'};
+const AT_TWO = {url: 'https://other.example.invalid', db: 'other'};
+
 test('tokens live in the keyring under the inventory schema', async () => {
-    assert.equal(await secrets.lookupToken('d1'), null);
-    await secrets.storeToken('d1', 'ERPLibre Home inventory: Odoo', 'TOK-1');
-    assert.equal(await secrets.lookupToken('d1'), 'TOK-1');
-    assert.equal(await secrets.lookupToken('d2'), null);
+    assert.equal(await secrets.lookupToken('d1', AT_ONE), null);
+    await secrets.storeToken('d1', 'ERPLibre Home inventory: Odoo', 'TOK-1',
+        AT_ONE);
+    assert.equal(await secrets.lookupToken('d1', AT_ONE), 'TOK-1');
+    assert.equal(await secrets.lookupToken('d2', AT_ONE), null);
     const [item] = [...fake.secrets.values()];
     assert.equal(item.schema, 'ca.technolibre.erplibre-home.inventory');
     assert.equal(secrets.SECRET_SCHEMA, item.schema);
-    assert.deepEqual(item.attrs, {destination: 'd1'});
+    assert.deepEqual(item.attrs, {destination: 'd1',
+        url: 'https://odoo.example.invalid', db: 'base1'});
     assert.equal(item.label, 'ERPLibre Home inventory: Odoo');
     assert.equal(item.collection, 'default');
-    await secrets.storeToken('d1', 'ERPLibre Home inventory: Odoo', 'TOK-2');
+    await secrets.storeToken('d1', 'ERPLibre Home inventory: Odoo', 'TOK-2',
+        AT_ONE);
     assert.equal(fake.secrets.size, 1, 'a new token replaces the old one');
-    assert.equal(await secrets.lookupToken('d1'), 'TOK-2');
+    assert.equal(await secrets.lookupToken('d1', AT_ONE), 'TOK-2');
     await secrets.clearToken('d1');
-    assert.equal(await secrets.lookupToken('d1'), null);
+    assert.equal(await secrets.lookupToken('d1', AT_ONE), null);
     // An empty password is no token.
-    await secrets.storeToken('d3', 'l', '');
-    assert.equal(await secrets.lookupToken('d3'), null);
+    await secrets.storeToken('d3', 'l', '', AT_ONE);
+    assert.equal(await secrets.lookupToken('d3', AT_ONE), null);
 });
+
+test('a token is found only for the URL and database it was issued for',
+    async () => {
+        await secrets.storeToken('d1', 'l', 'TOK-1', AT_ONE);
+        assert.equal(await secrets.lookupToken('d1', AT_TWO), null);
+        assert.equal(await secrets.lookupToken('d1',
+            {...AT_ONE, db: 'other'}), null);
+        assert.equal(await secrets.lookupToken('d1',
+            {...AT_ONE, url: 'https://other.example.invalid'}), null);
+        // The fingerprint ignores a trailing slash; so does the binding.
+        assert.equal(await secrets.lookupToken('d1',
+            {...AT_ONE, url: 'https://odoo.example.invalid/'}), 'TOK-1');
+        // A destination keeps one token: enrolling it elsewhere drops the
+        // token of its former Odoo, and clearing it drops every one.
+        await secrets.storeToken('d1', 'l', 'TOK-2', AT_TWO);
+        assert.equal(fake.secrets.size, 1);
+        assert.equal(await secrets.lookupToken('d1', AT_ONE), null);
+        assert.equal(await secrets.lookupToken('d1', AT_TWO), 'TOK-2');
+        await secrets.clearToken('d1');
+        assert.equal(fake.secrets.size, 0);
+    });
+
+test('a token is never looked up or stored without its URL and database',
+    async () => {
+        await secrets.storeToken('d1', 'l', 'TOK-1', AT_ONE);
+        await assert.rejects(secrets.lookupToken('d1'), TypeError);
+        await assert.rejects(secrets.lookupToken('d1', {url: AT_ONE.url}),
+            TypeError);
+        await assert.rejects(secrets.storeToken('d1', 'l', 'TOK-2'),
+            TypeError);
+        for (const id of [undefined, null, ''])
+            await assert.rejects(secrets.clearToken(id), TypeError);
+        assert.equal(await secrets.lookupToken('d1', AT_ONE), 'TOK-1');
+    });
 
 test('a keyring error rejects instead of answering "no token"', async () => {
     fake.secretError = 'collection is locked';
-    await assert.rejects(secrets.lookupToken('d1'), /locked/);
-    await assert.rejects(secrets.storeToken('d1', 'l', 't'), /locked/);
+    await assert.rejects(secrets.lookupToken('d1', AT_ONE), /locked/);
+    await assert.rejects(secrets.storeToken('d1', 'l', 't', AT_ONE),
+        /locked/);
     await assert.rejects(secrets.clearToken('d1'), /locked/);
 });

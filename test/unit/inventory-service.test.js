@@ -41,6 +41,11 @@ afterEach(() => {
 function harness({dests = [D1], tokens = {d1: TOKEN}, start = true} = {}) {
     const settings = makeSettings({
         'inventory-destinations': JSON.stringify(dests)});
+    // A token given as a string was issued for the destination of that id
+    // in `dests` (or D1, D2); `{token, url, db}` names where it was issued.
+    const issued = Object.fromEntries([D1, D2, ...dests].map(d =>
+        [d.id, {url: d.url, db: d.db}]));
+    const strip = u => String(u).replace(/\/+$/, '');
     let n = 0;
     h = {
         settings,
@@ -48,6 +53,12 @@ function harness({dests = [D1], tokens = {d1: TOKEN}, start = true} = {}) {
         calls: [],
         lookups: 0,
         serviceState: 'active',
+        serviceReads: [],
+        serviceHang: false,
+        facts: {...FACTS},
+        factsReads: [],
+        factsHang: false,
+        clockMs: 0,
         now: '2026-03-01T10:00:00.000Z',
         usb: {started: 0, stopped: 0, rescans: 0, cb: null,
             emit(decks) { this.cb(decks.map(d => ({...d}))); }},
@@ -58,18 +69,31 @@ function harness({dests = [D1], tokens = {d1: TOKEN}, start = true} = {}) {
             return {start: () => h.usb.started++, stop: () => h.usb.stopped++,
                 rescan: () => h.usb.rescans++};
         },
-        lookupToken: async id => {
+        lookupToken: async (id, at) => {
             h.lookups++;
             if (h.keyringError) throw new Error('locked');
-            return h.tokens[id] ?? null;
+            const t = h.tokens[id];
+            if (t === undefined || t === null) return null;
+            const e = typeof t === 'string' ? {token: t, ...issued[id]} : t;
+            return at && strip(at.url) === strip(e.url) && at.db === e.db
+                ? e.token : null;
         },
         newSession: () => ({session: true}),
         postJson: (session, url, db, p, body, token, {cancellable} = {}) =>
             new Promise(resolve => h.calls.push({session, url, db, path: p,
                 body, token, cancellable,
                 reply: (status, json) => resolve({status, json})})),
-        collectFacts: async () => ({...FACTS}),
-        readServiceState: async () => h.serviceState,
+        collectFacts: cancellable => {
+            h.factsReads.push(cancellable);
+            return h.factsHang ? new Promise(() => {})
+                : Promise.resolve({...h.facts});
+        },
+        readServiceState: cancellable => {
+            h.serviceReads.push(cancellable);
+            return h.serviceHang ? new Promise(() => {})
+                : Promise.resolve(h.serviceState);
+        },
+        clockMs: () => h.clockMs,
         now: () => h.now,
         newUuid: () => `uuid-${++n}`,
     };
@@ -434,7 +458,10 @@ test('the state file is private, holds the queue, never the token',
         assert.ok(!text.includes(TOKEN));
         assert.ok(!text.includes('TOKEN'));
         const saved = JSON.parse(text);
-        assert.deepEqual(Object.keys(saved).sort(), ['queue', 'status']);
+        assert.deepEqual(Object.keys(saved).sort(),
+            ['destination', 'queue', 'status']);
+        assert.deepEqual(saved.destination,
+            {url: 'https://odoo.example.invalid', db: 'base1'});
         assert.deepEqual(saved.status, {state: 'offline', pending: 1,
             lastReport: '2026-03-01T10:00:00.000Z', error: 'network'});
         assert.equal(saved.queue.events[0].serial, 'SN-INVENTED-A');
@@ -570,14 +597,72 @@ test('a destination added in the settings reports, a removed one stops',
         assert.deepEqual(h.service.statuses().map(s => s.id), ['d1']);
     });
 
-test('a destination whose URL changes starts over with a new session',
+const OTHER = {url: 'https://other.example.invalid', db: 'other'};
+
+for (const [what, change] of [['URL and database', OTHER],
+    ['URL', {url: OTHER.url}], ['database', {db: OTHER.db}]])
+    test(`a destination whose ${what} changes is unenrolled there`,
+        async () => {
+            await enrolledAndReported([]);
+            h.usb.emit([DECK_A]);
+            await settle();
+            await reply(1, [0, null]);
+            assert.equal(h.service.status('d1').pending, 1);
+            const moved = {...D1, ...change};
+            h.settings.set_string('inventory-destinations',
+                JSON.stringify([moved]));
+            await settle();
+            // The token of the first Odoo never goes to the second one.
+            assert.equal(h.calls.length, 2);
+            assert.deepEqual(h.service.status('d1'), {state: 'unenrolled',
+                pending: 0, lastReport: null, error: null});
+            // Enrolled there, it reports without the first one's events.
+            h.tokens.d1 = {token: 'TOKEN-OTHER', url: moved.url,
+                db: moved.db};
+            for (const t of liveMs(POLL_S * 1000)) fire(t);
+            await settle();
+            assert.equal(h.calls.length, 3);
+            assert.deepEqual([h.calls[2].url, h.calls[2].db, h.calls[2].token],
+                [moved.url, moved.db, 'TOKEN-OTHER']);
+            assert.deepEqual(h.calls[2].body.events, []);
+            assert.equal(h.calls[2].body.lost_events, 0);
+            assert.deepEqual(readState().destination,
+                {url: moved.url, db: moved.db});
+        });
+
+test('a state file kept for another URL or database is not read back',
     async () => {
         await enrolledAndReported([]);
-        h.settings.set_string('inventory-destinations', JSON.stringify(
-            [{...D1, url: 'https://moved.example.invalid'}]));
+        h.usb.emit([DECK_A]);
         await settle();
-        assert.equal(h.calls.length, 2);
-        assert.equal(h.calls[1].url, 'https://moved.example.invalid');
+        await reply(1, [0, null]);
+        h.service.stop();
+        const moved = {...D1, db: 'other'};
+        harness({dests: [moved], tokens: {d1: 'TOKEN-OTHER'}});
+        await settle();
+        assert.deepEqual(h.service.status('d1'), {state: 'unenrolled',
+            pending: 0, lastReport: null, error: null});
+        h.usb.emit([]);
+        await settle();
+        assert.deepEqual(h.calls[0].body.events, []);
+        assert.equal(h.calls[0].token, 'TOKEN-OTHER');
+    });
+
+test('a state file that does not say its destination is not read back',
+    async () => {
+        fs.mkdirSync(path.dirname(stateFile()), {recursive: true});
+        fs.writeFileSync(stateFile(), JSON.stringify({
+            queue: {events: [{uuid: 'uuid-old', kind: 'plugged',
+                at: '2026-03-01T09:00:00.000Z', serial: 'SN-INVENTED-A',
+                usb_product_id: '0084', usb_path: '1-2',
+                service_state: null}], lost: 3},
+            status: {state: 'ok', lastReport: '2026-03-01T09:00:00.000Z',
+                error: null}}));
+        harness();
+        h.usb.emit([]);
+        await settle();
+        assert.deepEqual(h.calls[0].body.events, []);
+        assert.equal(h.calls[0].body.lost_events, 0);
     });
 
 // ----------------------------------------------------------------- stop

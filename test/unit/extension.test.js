@@ -270,9 +270,10 @@ test('the inventory service runs from enable to disable', async () => {
 });
 
 test('a destination with a token gets a report once enabled', async () => {
-    fake.secrets.set(
-        'ca.technolibre.erplibre-home.inventory|[["destination","d1"]]',
-        {password: 'TOKEN-INVENTED'});
+    fake.secrets.set('d1', {schema: 'ca.technolibre.erplibre-home.inventory',
+        attrs: {destination: 'd1', url: 'https://odoo.example.invalid',
+            db: 'base1'},
+        password: 'TOKEN-INVENTED'});
     fake.onSpawn = argv => (argv[0] === 'systemctl'
         ? {stdout: 'LoadState=not-found\nActiveState=inactive\n'} : {});
     await enabled({'inventory-destinations': JSON.stringify([{id: 'd1',

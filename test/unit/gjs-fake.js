@@ -35,7 +35,9 @@
  *   error})` completes its send_and_read_async, `error` making the finish
  *   throw.
  * - Secret keeps passwords in memory, in `fake.secrets` keyed by schema
- *   name and attributes; `fake.secretError` makes the next calls fail.
+ *   name and attributes; lookup and clear match the items holding the
+ *   given attributes, as libsecret does; `fake.secretError` makes the next
+ *   calls fail.
  * - GUdev.Client lists `fake.udevDevices` (see `udevDevice`), records each
  *   client in `fake.udevClients`, and `fake.udevEmit(action, device)` runs
  *   their `uevent` handlers; `fake.udevMissing` makes the constructor
@@ -512,6 +514,13 @@ function secretKey(schema, attrs) {
     return `${schema.name}|${JSON.stringify(sorted)}`;
 }
 
+// libsecret's lookup and clear match the items holding all the given
+// attributes, whatever other attributes they hold.
+function secretMatches(schema, item, attrs) {
+    return item.schema === schema.name &&
+        Object.entries(attrs).every(([k, v]) => item.attrs[k] === v);
+}
+
 function secretLater(cb, work) {
     let res;
     try {
@@ -534,8 +543,8 @@ const Secret = looseObject({
     SchemaAttributeType: {STRING: 0},
     COLLECTION_DEFAULT: 'default',
     password_lookup(schema, attrs, _c, cb) {
-        secretLater(cb,
-            () => fake.secrets.get(secretKey(schema, attrs))?.password ?? null);
+        secretLater(cb, () => [...fake.secrets.values()].find(item =>
+            secretMatches(schema, item, attrs))?.password ?? null);
     },
     password_lookup_finish: secretFinish,
     password_store(schema, attrs, collection, label, password, _c, cb) {
@@ -548,7 +557,15 @@ const Secret = looseObject({
     },
     password_store_finish: secretFinish,
     password_clear(schema, attrs, _c, cb) {
-        secretLater(cb, () => fake.secrets.delete(secretKey(schema, attrs)));
+        secretLater(cb, () => {
+            let removed = false;
+            for (const [key, item] of fake.secrets) {
+                if (!secretMatches(schema, item, attrs)) continue;
+                fake.secrets.delete(key);
+                removed = true;
+            }
+            return removed;
+        });
     },
     password_clear_finish: secretFinish,
 });
