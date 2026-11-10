@@ -212,6 +212,46 @@ glib-compile-schemas --strict --dry-run schemas/
 vérifie que l'extension devient active, répond sur D-Bus et monte chaque
 indicateur. `test/manual.md` est la liste de vérification manuelle.
 
+### Verdicts dans le registre des requis
+
+`npm test` peut envoyer le verdict de chaque test au registre des requis
+d'une instance Odoo qui porte le module `erplibre_devops_requirement`. Un
+requis prouvé par un test de ce dépôt liste une ligne *Test Node* avec la
+référence
+`erplibre-home-gnome-extension:test/unit/<fichier>::<nom du test>`, ou une
+ligne *Test unitaire de dépôt* avec la référence
+`erplibre-home-gnome-extension:test/python/<fichier>::<Classe>::<méthode>`.
+Après les suites, `test/run_suites.py` écrit le verdict de chaque
+référence déclarée qui a tourné, avec un appel par référence ; un test
+qu'aucun requis ne cite ne coûte aucun appel. Un test déclaré absent d'un
+fichier qui a tourné jusqu'au bout est noté en erreur : il a été renommé
+ou supprimé, et sa référence est à mettre à jour.
+
+Quatre variables d'environnement l'activent, les quatre ou aucune.
+L'identifiant est un utilisateur du groupe *Lanceur de tests de requis*,
+et la clé est la clé d'API de cet utilisateur. `read -rs` lit la clé sans
+l'afficher et la garde hors de l'historique du shell :
+
+```bash
+export ERPLIBRE_REQUIREMENT_URL=https://odoo.example.com
+export ERPLIBRE_REQUIREMENT_DB=registry
+export ERPLIBRE_REQUIREMENT_LOGIN=test_runner
+read -rs ERPLIBRE_REQUIREMENT_KEY && export ERPLIBRE_REQUIREMENT_KEY
+npm test
+```
+
+L'URL doit être en HTTPS. HTTP sans chiffrement n'est accepté que vers
+une adresse de bouclage, comme un tunnel SSH vers l'instance, parce que
+la clé part avec chaque appel. Les suites elles-mêmes ne reçoivent pas
+ces variables. Chaque journal envoyé a la clé masquée, les chemins
+relatifs au dépôt et le répertoire personnel affiché `~`.
+
+Sans ces variables, `npm test` lance les deux commandes ci-dessus telles
+quelles, n'ouvre aucune connexion et n'affiche rien de plus. Avec elles,
+la sortie est la même, plus une ligne. Un envoi qui échoue affiche une
+ligne d'avertissement et s'arrête. Le code de sortie est toujours celui
+des suites, et la clé n'est jamais affichée.
+
 ## Internationalisation
 
 L'extension est livrée en anglais (source) et en français. GNOME

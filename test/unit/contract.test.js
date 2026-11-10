@@ -204,11 +204,17 @@ test('the device indicator reads the pid file the contract states', () => {
 test('the test commands the contract states are those npm test runs', () => {
     const commands = ['node --test test/unit/*.test.js',
         'python3 -m unittest discover -s test/python'];
+    // npm test starts test/run_suites.py, which runs its COMMAND: the
+    // node suite, then the Python suite.
     const pkg = JSON.parse(text('package.json'));
+    assert.equal(pkg.scripts.test, 'python3 test/run_suites.py');
+    const runner = text('test/run_suites.py');
     for (const command of commands) {
         assert.ok(FLAT.includes(`\`${command}\``), command);
-        assert.ok(pkg.scripts.test.includes(command), command);
+        assert.ok(runner.includes(`"${command}"`), command);
     }
+    assert.ok(runner.includes(
+        'COMMAND = f"{NODE_COMMAND} && {PYTHON_COMMAND}"'));
     assert.ok(readdirSync(new URL('test/python/', ROOT))
         .some((f) => /^test_\w+\.py$/.test(f)));
 });
