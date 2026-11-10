@@ -415,6 +415,21 @@ class TestPush(unittest.TestCase):
             f"~/repo2/other /x{root}",
         )
 
+    def test_a_key_holding_a_percent_sequence_is_masked_in_a_file_url(self):
+        """Decoding the URL would turn « %41 » into « A »: the key is
+        masked before, then again for a key that was itself encoded."""
+        key = "k%41y-invented"
+        registry = rr.Registry("https://registry.invalid/", "r", "u", key)
+        log = registry._neutralize(
+            f"at t (file:///opt/x.js?{key}:1:2)\n"
+            "at u (file:///opt/y.js?k%2541y-invented:1:2)",
+            "/srv/invented-root",
+        )
+        self.assertEqual(
+            log,
+            "at t (file:///opt/x.js?***:1:2)\nat u (file:///opt/y.js?***:1:2)",
+        )
+
     def test_a_file_url_of_a_stack_becomes_a_relative_path(self):
         root = Path("/srv/invented account/repo")
         registry = rr.Registry("https://registry.invalid/", "r", "u", KEY)
