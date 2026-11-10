@@ -1,6 +1,7 @@
-> **Release gate:** every box in this file must be ticked before tagging a release that touches the stream_deck gnome extension.
+> **Release gate:** every box in this file is ticked before a release of
+> the extension.
 
-# Stream Deck GNOME Extension — Manual Smoke Checklist
+# ERPLibre Home GNOME extension — Manual Smoke Checklist
 
 Run after each `gnome-extensions enable` cycle.
 
@@ -101,7 +102,7 @@ Run after each `gnome-extensions enable` cycle.
 
 ### i18n
 - [ ] `LANG=fr_FR.UTF-8 gnome-extensions prefs erplibre-home@technolibre.ca` shows French strings (e.g. "Ajouter un chemin…")
-- [ ] `make extension_i18n_compile` succeeds; `.mo` files exist under `locale/`
+- [ ] `po/compile_locales.py` succeeds (`make extension_i18n_compile` inside ERPLibre); `.mo` files exist under `locale/`
 
 ### Theming
 - [ ] Theming page: change pencil icon to `applications-utilities-symbolic` → top-bar icon updates after menu toggle
@@ -167,8 +168,13 @@ Run after each `gnome-extensions enable` cycle.
 
 ## Release
 
-- [ ] `make test_gnome_extension` passes (currently 62 unit tests)
-- [ ] `make test_full_fast` includes the extension target and passes
+From the repository root:
+
+- [ ] `npm test` passes (`node --test test/unit/*.test.js`, then `python3 -m unittest discover -s test/python`)
+- [ ] `glib-compile-schemas --strict --dry-run schemas/` passes
+- [ ] `msgfmt --check` passes on every `po/*.po`
 - [ ] All sections above ticked
-- [ ] CHANGELOG.base.md entry present and regenerated
-- [ ] README.base.md regenerated for both `script/stream_deck/` and `script/gnome-extension/erplibre_home/`
+- [ ] `CHANGELOG.md` has an entry under `[Unreleased]`
+- [ ] `README.md`, `README.fr.md` and `hooks/README*.md` regenerated from their `.base.md`: `pip install mmg`, then `mmg --yes README.base.md hooks/README.base.md`
+- [ ] A change ERPLibre can see bumps the version of `CONTRACT.md` as its Versioning section says; a MAJOR bump is pushed together with ERPLibre's side
+- [ ] Inside ERPLibre: `make test_gnome_extension` and ERPLibre's `test/test_erplibre_home_*.py` pass against this clone
