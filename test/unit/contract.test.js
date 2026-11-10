@@ -154,3 +154,12 @@ test('the ERPLibre paths the extension uses are those the contract states', () =
         DECK_UNIT, GALLERY_SERVER_REL, GALLERY_ACTION_HEADER])
         assert.ok(CONTRACT.includes(`\`${rel}`), rel);
 });
+
+test('the device indicator reads the pid file the contract states', () => {
+    const found = [...text('indicators/device.js').matchAll(
+        /^const PIDFILE = `\$\{GLib\.get_user_cache_dir\(\)\}\/([^`]+)`;$/gm)]
+        .map((m) => m[1]);
+    assert.equal(found.length, 1, 'one PIDFILE under the cache directory');
+    assert.ok(CONTRACT.includes(`\`$XDG_CACHE_HOME/${found[0]}\``),
+        found[0]);
+});
