@@ -423,7 +423,7 @@ msgid ""
 "Elgato hardware."
 msgstr ""
 
-msgid "Source folder"
+msgid "Source code"
 msgstr ""
 
 msgid "License"
