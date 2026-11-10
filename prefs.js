@@ -176,7 +176,8 @@ export default class ERPLibreHomePrefs extends ExtensionPreferences {
             title: _('Claude hooks'),
             description: _('How the Claude session badges stay in sync '
                 + 'with the agent. Install them once with '
-                + 'make claude_install_hooks.'),
+                + 'hooks/install_claude_hooks.py (make claude_install_hooks '
+                + 'in ERPLibre).'),
         });
         page.add(hooks);
         for (const [title, subtitle] of [
