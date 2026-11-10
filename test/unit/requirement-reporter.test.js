@@ -70,8 +70,20 @@ test('a skipped or todo test is skipped, whatever its outcome', async () => {
         ev('test:fail', {name: 'unfinished', todo: true,
             details: {error: assertionError('not yet')}}),
     ]);
-    assert.deepEqual(notes.map((n) => n.result), ['skipped', 'skipped']);
+    assert.deepEqual(notes.map((n) => [n.result, n.log]),
+        [['skipped', null], ['skipped', null]]);
 });
+
+test('the reason of a skip or a todo is the log of its verdict',
+    async () => {
+        const notes = await notesOf([
+            ev('test:pass', {name: 'later', skip: 'no device here'}),
+            ev('test:fail', {name: 'unfinished', todo: 'waits for v2',
+                details: {error: assertionError('not yet')}}),
+        ]);
+        assert.deepEqual(notes.map((n) => [n.result, n.log]),
+            [['skipped', 'no device here'], ['skipped', 'waits for v2']]);
+    });
 
 test('a failing subtest is noted on its top-level test, with its error',
     async () => {
@@ -144,7 +156,7 @@ test('a real node --test run gives one note per top-level test', () => {
             "import assert from 'node:assert/strict';",
             "test('ok', () => {});",
             "test('bad', () => assert.equal(1, 2));",
-            "test('later', {skip: true}, () => {});",
+            "test('later', {skip: 'no device here'}, () => {});",
             "test('parent', async (t) => {",
             "    await t.test('child', () => assert.ok(false));",
             '});',
@@ -172,6 +184,7 @@ test('a real node --test run gives one note per top-level test', () => {
         assert.equal(byTest.get(null).file, join(dir, 'broken.test.js'));
         assert.match(byTest.get(null).log, /import broke/);
         assert.match(byTest.get('parent').log, /child: /);
+        assert.equal(byTest.get('later').log, 'no device here');
     } finally {
         rmSync(dir, {recursive: true, force: true});
     }
