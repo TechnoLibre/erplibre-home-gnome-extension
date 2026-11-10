@@ -35,7 +35,9 @@ Stream Deck n'est pas installé.
 
 ## Installer
 
-Il faut GNOME Shell 45 ou plus récent, git, `glib-compile-schemas` (paquet
+Il faut GNOME Shell 45 à 51 (la liste `shell-version` de
+`metadata.json` : le Shell refuse une autre version majeure), git,
+`glib-compile-schemas` (paquet
 `libglib2.0-bin` sur Debian et Ubuntu) et, pour les traductions, `msgfmt`
 (paquet `gettext`). Les indicateurs appellent `gnome-terminal`, `nmap` ou
 `nc`, `mpv`, `keepassxc-cli` et `xdotool` quand ils sont présents. Cloner
@@ -188,6 +190,11 @@ gdbus call --session --dest org.gnome.Shell \
 `DEBUG.md` relie les symptômes aux journaux et aux sondes ;
 `ARCHITECTURE.md` décrit comment s'assemblent les indicateurs,
 l'interface D-Bus et les fichiers d'état.
+
+`README.md`, `README.fr.md` et `hooks/README*.md` sont générés par mmg à
+partir du `README.base.md` voisin : modifier le `.base.md`, puis lancer
+`pip install mmg` une fois et
+`mmg --yes README.base.md hooks/README.base.md`.
 
 ## Tests
 

@@ -34,7 +34,9 @@ entries say that the Stream Deck level is not installed.
 
 ## Install
 
-It needs GNOME Shell 45 or later, git, `glib-compile-schemas` (package
+It needs GNOME Shell 45 to 51 (the `shell-version` list of
+`metadata.json`: the Shell refuses another major), git,
+`glib-compile-schemas` (package
 `libglib2.0-bin` on Debian and Ubuntu) and, for the translations, `msgfmt`
 (package `gettext`). The indicators call `gnome-terminal`, `nmap` or `nc`,
 `mpv`, `keepassxc-cli` and `xdotool` when they are present. Clone the
@@ -184,6 +186,10 @@ gdbus call --session --dest org.gnome.Shell \
 
 `DEBUG.md` maps symptoms to logs and probes; `ARCHITECTURE.md` describes
 how the indicators, the D-Bus interface and the state files fit together.
+
+`README.md`, `README.fr.md` and `hooks/README*.md` are generated from
+the `README.base.md` next to them by mmg: edit the `.base.md`, then run
+`pip install mmg` once and `mmg --yes README.base.md hooks/README.base.md`.
 
 ## Tests
 

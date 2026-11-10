@@ -79,7 +79,9 @@ Stream Deck n'est pas installé.
 <!-- [en] -->
 ## Install
 
-It needs GNOME Shell 45 or later, git, `glib-compile-schemas` (package
+It needs GNOME Shell 45 to 51 (the `shell-version` list of
+`metadata.json`: the Shell refuses another major), git,
+`glib-compile-schemas` (package
 `libglib2.0-bin` on Debian and Ubuntu) and, for the translations, `msgfmt`
 (package `gettext`). The indicators call `gnome-terminal`, `nmap` or `nc`,
 `mpv`, `keepassxc-cli` and `xdotool` when they are present. Clone the
@@ -89,7 +91,9 @@ the clone into the user's extensions directory under its UUID:
 <!-- [fr] -->
 ## Installer
 
-Il faut GNOME Shell 45 ou plus récent, git, `glib-compile-schemas` (paquet
+Il faut GNOME Shell 45 à 51 (la liste `shell-version` de
+`metadata.json` : le Shell refuse une autre version majeure), git,
+`glib-compile-schemas` (paquet
 `libglib2.0-bin` sur Debian et Ubuntu) et, pour les traductions, `msgfmt`
 (paquet `gettext`). Les indicateurs appellent `gnome-terminal`, `nmap` ou
 `nc`, `mpv`, `keepassxc-cli` et `xdotool` quand ils sont présents. Cloner
@@ -384,6 +388,10 @@ gdbus call --session --dest org.gnome.Shell \
 `DEBUG.md` maps symptoms to logs and probes; `ARCHITECTURE.md` describes
 how the indicators, the D-Bus interface and the state files fit together.
 
+`README.md`, `README.fr.md` and `hooks/README*.md` are generated from
+the `README.base.md` next to them by mmg: edit the `.base.md`, then run
+`pip install mmg` once and `mmg --yes README.base.md hooks/README.base.md`.
+
 ## Tests
 
 The unit tests need Node.js 22 or later and Python 3, nothing else; they
@@ -393,6 +401,11 @@ run in a clone on its own as well as inside ERPLibre:
 `DEBUG.md` relie les symptômes aux journaux et aux sondes ;
 `ARCHITECTURE.md` décrit comment s'assemblent les indicateurs,
 l'interface D-Bus et les fichiers d'état.
+
+`README.md`, `README.fr.md` et `hooks/README*.md` sont générés par mmg à
+partir du `README.base.md` voisin : modifier le `.base.md`, puis lancer
+`pip install mmg` une fois et
+`mmg --yes README.base.md hooks/README.base.md`.
 
 ## Tests
 
