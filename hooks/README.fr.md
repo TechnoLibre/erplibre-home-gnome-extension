@@ -5,11 +5,13 @@ L'extension GNOME ERPLibre Home affiche un badge sur l'indicateur
 qui attendent l'utilisateur (jaune = `Stop`, rouge = `Notification`).
 Le badge lit des fichiers JSON écrits par un petit hook Claude Code.
 ## Installation
-1. Le script du hook est dans
-   `script/gnome-extension/erplibre_home/hooks/erplibre-home-hook.py`.
-   Il est déjà exécutable et ne dépend que de Python 3.
-2. Branche-le dans Claude Code en ajoutant les matchers ci-dessous à
-   `~/.claude/settings.json` (fusionne avec ton bloc `hooks` existant).
+1. Le script du hook est `hooks/erplibre-home-hook.py` dans le
+   répertoire de l'extension. Il est déjà exécutable et ne dépend que de
+   Python 3.
+2. Branche-le dans Claude Code : `hooks/install_claude_hooks.py` fusionne
+   les matchers dans `~/.claude/settings.json` (`--dry-run` montre le
+   changement, `--remove` les retire), ou ajoute à la main les matchers
+   ci-dessous, fusionnés avec ton bloc `hooks` existant.
 ```json
 {
   "hooks": {

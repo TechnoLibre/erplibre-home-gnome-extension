@@ -6,11 +6,12 @@ flags whichever ones are waiting for the user (yellow = `Stop`, red =
 `Notification`). The badge data comes from JSON files written by a
 small Claude Code hook.
 ## Install
-1. The hook script lives at
-   `script/gnome-extension/erplibre_home/hooks/erplibre-home-hook.py`.
-   It is already executable and only needs Python 3.
-2. Wire it into Claude Code by adding the matchers below to
-   `~/.claude/settings.json` (merge with any existing `hooks` block).
+1. The hook script is `hooks/erplibre-home-hook.py` in the extension's
+   directory. It is already executable and only needs Python 3.
+2. Wire it into Claude Code: `hooks/install_claude_hooks.py` merges the
+   matchers into `~/.claude/settings.json` (`--dry-run` shows the change,
+   `--remove` takes them out), or add the matchers below by hand, merged
+   with any existing `hooks` block.
 ```json
 {
   "hooks": {

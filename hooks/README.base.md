@@ -29,17 +29,20 @@ Le badge lit des fichiers JSON écrits par un petit hook Claude Code.
 <!-- [end] -->
 
 <!-- [en] -->
-1. The hook script lives at
-   `script/gnome-extension/erplibre_home/hooks/erplibre-home-hook.py`.
-   It is already executable and only needs Python 3.
-2. Wire it into Claude Code by adding the matchers below to
-   `~/.claude/settings.json` (merge with any existing `hooks` block).
+1. The hook script is `hooks/erplibre-home-hook.py` in the extension's
+   directory. It is already executable and only needs Python 3.
+2. Wire it into Claude Code: `hooks/install_claude_hooks.py` merges the
+   matchers into `~/.claude/settings.json` (`--dry-run` shows the change,
+   `--remove` takes them out), or add the matchers below by hand, merged
+   with any existing `hooks` block.
 <!-- [fr] -->
-1. Le script du hook est dans
-   `script/gnome-extension/erplibre_home/hooks/erplibre-home-hook.py`.
-   Il est déjà exécutable et ne dépend que de Python 3.
-2. Branche-le dans Claude Code en ajoutant les matchers ci-dessous à
-   `~/.claude/settings.json` (fusionne avec ton bloc `hooks` existant).
+1. Le script du hook est `hooks/erplibre-home-hook.py` dans le
+   répertoire de l'extension. Il est déjà exécutable et ne dépend que de
+   Python 3.
+2. Branche-le dans Claude Code : `hooks/install_claude_hooks.py` fusionne
+   les matchers dans `~/.claude/settings.json` (`--dry-run` montre le
+   changement, `--remove` les retire), ou ajoute à la main les matchers
+   ci-dessous, fusionnés avec ton bloc `hooks` existant.
 <!-- [end] -->
 
 <!-- [common] -->
