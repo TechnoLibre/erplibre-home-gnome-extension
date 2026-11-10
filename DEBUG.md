@@ -4,6 +4,11 @@ When the extension misbehaves, walk through this list before opening
 an issue. It maps the most common symptoms to the log file or D-Bus
 probe that will surface the root cause.
 
+The `make` targets below run from the root of the ERPLibre checkout that
+holds the extension. Without ERPLibre, the README's Install section gives
+the same steps by hand, and `hooks/install_claude_hooks.py` stands for
+`make claude_install_hooks`.
+
 ## Log files
 
 | Path | Source |
