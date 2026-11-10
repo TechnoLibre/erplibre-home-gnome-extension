@@ -92,8 +92,12 @@ test('selenium auto-login runs web_login.py in .venv.erplibre', async () => {
     assert.deepEqual(spawnedOutside(), [[
         `${root}/.venv.erplibre/bin/python`,
         `${root}/script/selenium/web_login.py`,
-        '--url', 'https://erp.test', '--user', 'admin', '--pass', 's3cret',
+        '--url', 'https://erp.test', '--default_email_auth', 'admin',
+        '--default_password_auth_env', 'ERPLIBRE_HOME_LOGIN_PASSWORD',
     ]]);
+    const login = fake.spawned.find(s => s.argv[0] !== 'keepassxc-cli');
+    assert.deepEqual(login.env, {ERPLIBRE_HOME_LOGIN_PASSWORD: 's3cret'});
+    assert.equal(login.stdin, null);
 });
 
 const XDOTOOL = [
@@ -101,15 +105,25 @@ const XDOTOOL = [
     ['sleep', '2'],
     ['xdotool', 'type', 'admin'],
     ['xdotool', 'key', 'Tab'],
-    ['xdotool', 'type', 's3cret'],
+    ['xdotool', 'type', '--file', '-'],
     ['xdotool', 'key', 'Return'],
 ];
+
+/** The password reaches xdotool on stdin, never in an argv. */
+function assertXdotoolStdin() {
+    const outside = fake.spawned.filter(s => s.argv[0] !== 'keepassxc-cli');
+    assert.deepEqual(outside.filter(s => s.stdin !== null)
+        .map(s => [s.argv, s.stdin]),
+    [[['xdotool', 'type', '--file', '-'], 's3cret']]);
+    assert.ok(!outside.some(s => s.argv.includes('s3cret')));
+}
 
 test('xdotool auto-login opens the URL, then types the login', async () => {
     cachePassword();
     const inst = {...INSTANCE, auto_login_method: 'xdotool'};
     await activate(erplibre(inst), 'Auto-login (xdotool)');
     assert.deepEqual(spawnedOutside(), XDOTOOL);
+    assertXdotoolStdin();
 });
 
 test('selenium without .venv.erplibre falls back to xdotool', async () => {
@@ -118,6 +132,7 @@ test('selenium without .venv.erplibre falls back to xdotool', async () => {
         {'git-sync-path': join(fake.root, 'no-venv')}),
     'Auto-login (selenium)');
     assert.deepEqual(spawnedOutside(), XDOTOOL);
+    assertXdotoolStdin();
     assert.equal(fake.notified.length, 1);
 });
 

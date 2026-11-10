@@ -98,6 +98,12 @@ migrations that are not auto-applied.
   `make erplibre_home_install_extension`.
 
 ### Fixed
+- Auto-login keeps the password off every command line and out of the
+  log: Selenium receives it in the `ERPLIBRE_HOME_LOGIN_PASSWORD`
+  environment variable, named by `--default_password_auth_env`, and logs
+  in with `--default_email_auth` (the `--user` / `--pass` options it was
+  given do not exist in `web_login.py`); xdotool types it from standard
+  input (`xdotool type --file -`).
 - Launching a game from the menu says why the gallery refused it — the
   games turned off by `GAMES=off`, an unknown game — instead of failing
   silently; only an unreachable gallery was reported before.

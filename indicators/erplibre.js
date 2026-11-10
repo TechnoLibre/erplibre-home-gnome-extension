@@ -10,7 +10,8 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import {parseList, serializeList, uuid4} from '../lib/settings.js';
 import {buildBrowserArgv, buildTerminalArgv, findTerminal,
-    spawnDetached, runProcess} from '../lib/spawn.js';
+    spawnDetached, runProcess, buildSeleniumLoginStep,
+    buildXdotoolLoginSteps} from '../lib/spawn.js';
 import {detectLocalInstancesGjs} from '../lib/erplibre-detect.js';
 import {projectRootFrom, makeGioReadLink} from '../lib/project-root.js';
 import {callKeepassCli, masterPasswordCache, cacheKey}
@@ -458,30 +459,26 @@ class ErpLibreIndicator extends PanelMenu.Button {
             || projectRootFrom(this._extension.path, makeGioReadLink(Gio));
         const venv = `${root}/.venv.erplibre/bin/python`;
         const script = `${root}/script/selenium/web_login.py`;
-        const argv = [venv, script,
-            '--url', inst.url, '--user', user, '--pass', pass];
         if (!GLib.file_test(venv, GLib.FileTest.IS_EXECUTABLE)) {
             _notify('ERPLibre',
                 _('.venv.erplibre missing — falling back to xdotool'));
             this._autoLoginXdotool(inst, user, pass);
             return;
         }
-        runProcess(argv, {notify: _notify, title: 'ERPLibre'});
+        const step = buildSeleniumLoginStep({python: venv, script,
+            url: inst.url, user, password: pass});
+        runProcess(step.argv,
+            {env: step.env, notify: _notify, title: 'ERPLibre'});
     }
 
     async _autoLoginXdotool(inst, user, pass) {
         spawnDetached(buildBrowserArgv(inst.url),
             {notify: _notify, title: 'ERPLibre'});
-        // Wait for browser focus to land. xdotool itself is the runner.
-        const seq = [
-            ['sleep', '2'],
-            ['xdotool', 'type', user],
-            ['xdotool', 'key', 'Tab'],
-            ['xdotool', 'type', pass],
-            ['xdotool', 'key', 'Return'],
-        ];
-        for (const argv of seq)
-            await runProcess(argv, {notify: _notify, title: 'ERPLibre'});
+        // The first step waits for the browser to take the focus.
+        for (const step of buildXdotoolLoginSteps({user, password: pass})) {
+            await runProcess(step.argv, {stdin: step.stdin,
+                notify: _notify, title: 'ERPLibre'});
+        }
     }
 
     _openAddDialog() {

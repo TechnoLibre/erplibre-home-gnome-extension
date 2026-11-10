@@ -166,8 +166,10 @@ check it.
    starts it with `make run`, opens its TODO menu with
    `source .venv.erplibre/bin/activate && python3 -u ./script/todo/todo.py`,
    and logs in with
-   `.venv.erplibre/bin/python script/selenium/web_login.py --url --user --pass`
-   (xdotool when that venv is missing). One notice names
+   `.venv.erplibre/bin/python script/selenium/web_login.py --url
+   --default_email_auth --default_password_auth_env
+   ERPLIBRE_HOME_LOGIN_PASSWORD`, the password in that environment
+   variable only (xdotool when that venv is missing). One notice names
    `script/stream_deck/INSTALL.md`.
 5. **Odoo inventory:** an Odoo instance with the ERPLibre module
    `erplibre_streamdeck` serves `/streamdeck/v1/enroll`,
