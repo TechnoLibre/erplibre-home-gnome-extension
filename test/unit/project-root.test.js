@@ -6,6 +6,7 @@ import {projectRootFrom, makeGioReadLink, normalizePath, resolveLinkTarget,
     streamDeckPython, galleryServerCommand, galleryReady}
     from '../../lib/project-root.js';
 import {openDeckArgv} from '../../lib/deck-service.js';
+import {buildSeleniumLoginStep} from '../../lib/spawn.js';
 
 const CHECKOUT = '/opt/depot';
 const EXT_SRC = `${CHECKOUT}/script/gnome-extension/erplibre_home`;
@@ -408,7 +409,8 @@ function seleniumLogin({gitSyncPath = '', present = []} = {}) {
         '_autoLoginSelenium', 'inst, user, pass');
     const calls = [];
     const login = new Function('GLib', 'projectRootFrom', 'makeGioReadLink',
-        'Gio', '_notify', '_', 'runProcess', 'inst', 'user', 'pass', body);
+        'Gio', '_notify', '_', 'runProcess', 'buildSeleniumLoginStep',
+        'inst', 'user', 'pass', body);
     const fake = {
         _settings: {get_string: (key) => (key === 'git-sync-path'
             ? gitSyncPath : '')},
@@ -422,7 +424,8 @@ function seleniumLogin({gitSyncPath = '', present = []} = {}) {
     login.call(fake, fakeGLib(new Set(present)), rootFrom,
         () => linksTo({[LINK]: EXT_SRC}), {},
         (...a) => calls.push(['notify', ...a]), (s) => s,
-        (argv) => calls.push(['run', argv]),
+        (argv, {env}) => calls.push(['run', argv, env]),
+        buildSeleniumLoginStep,
         {url: 'http://localhost:8069'}, 'u', 'p');
     return calls;
 }
@@ -433,8 +436,10 @@ test('selenium login runs under .venv.erplibre of the extension checkout',
         assert.deepEqual(seleniumLogin({present: [venv]}), [
             ['projectRootFrom', LINK],
             ['run', [venv, `${CHECKOUT}/script/selenium/web_login.py`,
-                '--url', 'http://localhost:8069', '--user', 'u',
-                '--pass', 'p']],
+                '--url', 'http://localhost:8069', '--default_email_auth', 'u',
+                '--default_password_auth_env',
+                'ERPLIBRE_HOME_LOGIN_PASSWORD'],
+            {ERPLIBRE_HOME_LOGIN_PASSWORD: 'p'}],
         ]);
     });
 

@@ -16,7 +16,9 @@
  *   caller writes lands in `record.stdin`. With `{hang: true}` the process
  *   never ends: communicate_utf8_async answers only once its cancellable
  *   is cancelled, with a cancellation error; `force_exit` sets
- *   `record.killed`.
+ *   `record.killed`. Gio.SubprocessLauncher spawns the same way; the
+ *   variables set on it land in `record.env`, which is null for a plain
+ *   Gio.Subprocess.new.
  * - GLib file functions and Gio.File read and write the real file system;
  *   the user directories, `$USER` and the host name come from `fake.env`,
  *   which points at a fresh temporary directory, removed at the next
@@ -297,8 +299,8 @@ const GLib = looseObject({
 const SubprocessFlags = {NONE: 0, STDIN_PIPE: 1, STDOUT_PIPE: 2,
     STDERR_PIPE: 4, STDERR_SILENCE: 8};
 
-function newSubprocess(argv, flags) {
-    const record = {argv: [...argv], flags, stdin: null};
+function newSubprocess(argv, flags, env = null) {
+    const record = {argv: [...argv], flags, stdin: null, env};
     fake.spawned.push(record);
     const answer = fake.onSpawn([...argv], record) ?? {};
     const res = {exit: answer.exit ?? 0, stdout: answer.stdout ?? '',
@@ -340,6 +342,18 @@ function newSubprocess(argv, flags) {
         send_signal() {},
     };
     return proc;
+}
+
+/** Holds flags and setenv() variables until spawnv() spawns. */
+class SubprocessLauncher {
+    constructor({flags = 0} = {}) {
+        this._flags = flags;
+        this._env = {};
+    }
+
+    setenv(name, value, _overwrite) { this._env[name] = value; }
+
+    spawnv(argv) { return newSubprocess(argv, this._flags, {...this._env}); }
 }
 
 class FakeOutput {
@@ -439,7 +453,8 @@ class Credentials {
 const Gio = looseObject({
     SubprocessFlags,
     Credentials,
-    Subprocess: looseObject({new: newSubprocess}),
+    Subprocess: looseObject({new: (argv, flags) => newSubprocess(argv, flags)}),
+    SubprocessLauncher,
     File: looseObject({new_for_path: p => new FakeFile(p)}),
     FileCreateFlags: {NONE: 0, REPLACE_DESTINATION: 1, PRIVATE: 2},
     FileQueryInfoFlags: {NONE: 0, NOFOLLOW_SYMLINKS: 1},

@@ -13,6 +13,9 @@ import {
     buildSpotifyArgv,
     parsePosition,
     formatPosition,
+    LOGIN_PASSWORD_ENV,
+    buildSeleniumLoginStep,
+    buildXdotoolLoginSteps,
 } from '../../lib/spawn.js';
 
 test('buildTerminalArgv with cwd + command', () => {
@@ -162,4 +165,101 @@ test('a command that exits non-zero notifies and logs its exit', async () => {
     assert.equal(entry.level, 'error');
     assert.equal(entry.source, 'xdotool');
     assert.equal(entry.message, 'xdotool key Tab :: exit=3 locked');
+});
+
+const LOGIN = {python: '/p/.venv.erplibre/bin/python',
+    script: '/p/script/selenium/web_login.py', url: 'https://erp.test',
+    user: 'admin', password: 'pw-not-in-argv'};
+
+/** Every argv element that holds the password, whole or in part. */
+const leaks = (argv, password) => argv.filter(a => String(a).includes(password));
+
+/**
+ * The log entries once an error landed: the info line of an earlier
+ * test's spawn can reach the same fresh file first.
+ */
+async function entriesWithError() {
+    let entries = [];
+    for (let i = 0; i < 50; i++) {
+        entries = await logEntries();
+        if (entries.some(e => e.level === 'error')) return entries;
+        await settle();
+    }
+    assert.fail('no error entry was logged');
+}
+
+test('selenium login: the password travels in the environment only', () => {
+    const step = buildSeleniumLoginStep(LOGIN);
+    assert.deepEqual(step.argv, [LOGIN.python, LOGIN.script,
+        '--url', 'https://erp.test', '--default_email_auth', 'admin',
+        '--default_password_auth_env', 'ERPLIBRE_HOME_LOGIN_PASSWORD']);
+    assert.deepEqual(leaks(step.argv, LOGIN.password), []);
+    assert.equal(LOGIN_PASSWORD_ENV, 'ERPLIBRE_HOME_LOGIN_PASSWORD');
+    assert.deepEqual(step.env, {ERPLIBRE_HOME_LOGIN_PASSWORD: LOGIN.password});
+    assert.equal(step.stdin, undefined);
+});
+
+test('xdotool login: the password is typed from standard input', () => {
+    const steps = buildXdotoolLoginSteps(LOGIN);
+    assert.deepEqual(steps.map(s => s.argv), [
+        ['sleep', '2'],
+        ['xdotool', 'type', 'admin'],
+        ['xdotool', 'key', 'Tab'],
+        ['xdotool', 'type', '--file', '-'],
+        ['xdotool', 'key', 'Return'],
+    ]);
+    for (const s of steps) {
+        assert.deepEqual(leaks(s.argv, LOGIN.password), []);
+        assert.equal(s.env, undefined);
+    }
+    assert.deepEqual(steps.filter(s => s.stdin !== undefined),
+        [{argv: ['xdotool', 'type', '--file', '-'], stdin: LOGIN.password}]);
+});
+
+test('runProcess hands env and stdin to the child', async () => {
+    fake.reset();
+    const res = await runProcess(['xdotool', 'type', '--file', '-'],
+        {stdin: 'typed', env: {SOME_VAR: 'v'}});
+    assert.equal(res.ok, true);
+    const [rec] = fake.spawned;
+    assert.equal(rec.stdin, 'typed');
+    assert.ok(rec.flags & 1, 'STDIN_PIPE');
+    assert.deepEqual(rec.env, {SOME_VAR: 'v'});
+});
+
+test('runProcess without stdin opens no stdin pipe', async () => {
+    fake.reset();
+    await runProcess(['xdotool', 'key', 'Tab']);
+    const [rec] = fake.spawned;
+    assert.equal(rec.stdin, null);
+    assert.equal(rec.flags & 1, 0);
+    assert.deepEqual(rec.env, {});
+});
+
+test('a failed login logs and notifies neither env nor stdin', async () => {
+    const secret = 'pw-never-logged';
+    for (const step of [
+        buildSeleniumLoginStep({...LOGIN, password: secret}),
+        buildXdotoolLoginSteps({...LOGIN, password: secret})[3],
+    ]) {
+        fake.reset();
+        fake.onSpawn = () => ({exit: 1, stderr: 'boom'});
+        const notified = [];
+        await runProcess(step.argv, {env: step.env,
+            stdin: step.stdin, notify: (t, b) => notified.push([t, b])});
+        const entries = await entriesWithError();
+        assert.ok(!JSON.stringify(entries).includes(secret));
+        assert.equal(notified.length, 1);
+        assert.ok(!JSON.stringify(notified).includes(secret));
+    }
+});
+
+test('a login that cannot spawn logs no secret either', async () => {
+    const secret = 'pw-never-logged';
+    fake.reset();
+    fake.onSpawn = () => { throw new Error('No such file'); };
+    const step = buildSeleniumLoginStep({...LOGIN, password: secret});
+    await runProcess(step.argv, {env: step.env, notify: () => {}});
+    const entries = await entriesWithError();
+    assert.ok(!JSON.stringify(entries).includes(secret));
 });
