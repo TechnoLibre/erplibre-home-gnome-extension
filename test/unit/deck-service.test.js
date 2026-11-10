@@ -1,12 +1,14 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync, statSync} from 'node:fs';
+import {readFileSync, realpathSync, statSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
 import {DECK_UNIT, CONTROLLER_REL, DECK_ENTRY_REL, DECK_READ_AT_MS,
     deckUnitPath, deckLockPath, openDeckArgv, restartDeckArgv, deckStateArgv,
     deckRunning, deckCheckArgv, deckStartFailure, parseUnitShow,
     deckStartOutcome, deckStartSettled, awaitDeckStart, parseLockHolder,
     deckStartNotice}
     from '../../lib/deck-service.js';
+import {projectRootFrom} from '../../lib/project-root.js';
 
 const ROOT = '/opt/mon depot';
 const PYTHON = `${ROOT}/.venv.streamdeck/bin/python`;
@@ -265,12 +267,18 @@ test('active, activating and reloading count as running', () => {
         assert.equal(deckRunning(state), false, String(state));
 });
 
-test('the controller path is relative to the checkout root', () => {
-    // The extension lives under script/gnome-extension/erplibre_home: the
-    // checkout root is five levels above this file.
-    const root = new URL('../../../../../', import.meta.url);
+// The ERPLibre checkout that holds this clone, found as the extension
+// finds it; '' when the clone stands alone, outside any checkout.
+const EXTENSION_DIR = realpathSync(
+    fileURLToPath(new URL('../../', import.meta.url))).replace(/\/+$/, '');
+const CHECKOUT = projectRootFrom(EXTENSION_DIR, null);
+const IN_CHECKOUT = CHECKOUT !== EXTENSION_DIR;
+
+test('the controller path is relative to the checkout root', {
+    skip: IN_CHECKOUT ? false : 'not inside an ERPLibre checkout',
+}, () => {
     assert.equal(CONTROLLER_REL, 'script/stream_deck/erplibre_controller.py');
-    assert.ok(statSync(new URL(CONTROLLER_REL, root)).isFile());
+    assert.ok(statSync(`${CHECKOUT}/${CONTROLLER_REL}`).isFile());
 });
 
 test('the check runs the entry point of the checkout with --check', () => {
