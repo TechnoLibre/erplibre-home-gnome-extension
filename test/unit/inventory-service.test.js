@@ -496,6 +496,96 @@ test('a corrupt state file gives an empty queue', async () => {
     assert.equal(h.calls[0].body.lost_events, 0);
 });
 
+// ------------------------------------------- reads of the workstation
+
+test('facts that never come do not hold the reports past TIMEOUT_S',
+    async () => {
+        harness();
+        h.factsHang = true;
+        h.usb.emit([DECK_A]);
+        await settle();
+        assert.equal(h.calls.length, 0, 'waits for the facts first');
+        assert.equal(h.factsReads.length, 1);
+        // The newest TIMEOUT_S source is the deadline of the reading; the
+        // older one is the tick (POLL_S has the same length).
+        const tens = liveMs(TIMEOUT_S * 1000);
+        assert.equal(tens.length, 2);
+        fire(tens[tens.length - 1]);
+        await settle();
+        assert.equal(h.factsReads[0].is_cancelled(), true);
+        assert.equal(h.calls.length, 1, 'the report goes without them');
+        assert.deepEqual(h.calls[0].body.state.decks.map(d => d.serial),
+            ['SN-INVENTED-A']);
+        assert.equal(h.calls[0].body.state.erplibre, null);
+        await reply(0, ok());
+        assert.equal(h.service.status('d1').state, 'ok');
+        // A reading that timed out is not kept: the next report reads again.
+        h.factsHang = false;
+        fire(liveMs(HEARTBEAT_S * 1000)[0]);
+        await settle();
+        assert.equal(h.factsReads.length, 2);
+        assert.deepEqual(h.calls[1].body.state.erplibre,
+            {branch: 'main', commit: 'abc123'});
+    });
+
+test('a deck service reading that never comes does not hold the reports',
+    async () => {
+        harness();
+        h.serviceHang = true;
+        h.usb.emit([]);
+        await settle();
+        assert.equal(h.calls.length, 0);
+        const tens = liveMs(TIMEOUT_S * 1000);
+        fire(tens[tens.length - 1]);
+        await settle();
+        assert.equal(h.serviceReads[0].is_cancelled(), true);
+        assert.equal(h.calls.length, 1);
+        assert.equal(h.calls[0].body.state.service_state, 'absent');
+    });
+
+test('a deck service poll that never returns is abandoned after TIMEOUT_S',
+    async () => {
+        await enrolledAndReported([]);
+        const reads = h.serviceReads.length;
+        h.serviceHang = true;
+        const [tick] = liveMs(POLL_S * 1000);
+        fire(tick);
+        await settle();
+        assert.equal(h.serviceReads.length, reads + 1);
+        // One poll at a time: the ticks meanwhile start none.
+        fire(tick);
+        fire(tick);
+        await settle();
+        assert.equal(h.serviceReads.length, reads + 1);
+        const deadline = live().filter(t => t !== tick &&
+            t.ms === TIMEOUT_S * 1000);
+        assert.equal(deadline.length, 1);
+        fire(deadline[0]);
+        await settle();
+        assert.equal(h.serviceReads[reads].is_cancelled(), true);
+        // The next tick polls again, and a change is still seen.
+        h.serviceHang = false;
+        h.serviceState = 'failed';
+        fire(tick);
+        await settle();
+        assert.equal(h.serviceReads.length, reads + 2);
+        assert.deepEqual(h.calls[1].body.events.map(e => e.service_state),
+            ['failed']);
+    });
+
+test('stop() cancels a reading in progress and its deadline', async () => {
+    harness();
+    h.factsHang = true;
+    h.usb.emit([]);
+    await settle();
+    assert.ok(live().length >= 2, 'tick and deadline');
+    h.service.stop();
+    assert.equal(h.factsReads[0].is_cancelled(), true);
+    assert.deepEqual(live(), []);
+    await settle();
+    assert.equal(h.calls.length, 0);
+});
+
 // ------------------------------------------------- service and decks
 
 test('a USB watch that cannot start leaves the service reporting no deck',
@@ -897,6 +987,17 @@ test('collectFacts outside a checkout, detached or unreadable', async () => {
 
     facts = await svc.collectFacts({extensionPath: null, osRelease: []});
     assert.equal(facts.erplibre, null);
+});
+
+test('a reading cancelled by its deadline kills the process', async () => {
+    fake.onSpawn = () => ({hang: true});
+    const cancellable = new (await import('gi://Gio')).default.Cancellable();
+    const state = svc.readServiceState(cancellable);
+    await settle();
+    assert.equal(fake.spawned[0].killed, undefined);
+    cancellable.cancel();
+    assert.equal(await state, 'absent');
+    assert.equal(fake.spawned[0].killed, true);
 });
 
 test('readServiceState asks systemd about the deck unit', async () => {

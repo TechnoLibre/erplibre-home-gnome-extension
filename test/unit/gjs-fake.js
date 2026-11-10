@@ -13,7 +13,10 @@
  * - Gio.Subprocess.new records each argv in `fake.spawned` and answers
  *   through `fake.onSpawn(argv, record)`: it returns {exit, stdout, stderr}
  *   (all optional), or throws to make the spawn itself fail. The stdin a
- *   caller writes lands in `record.stdin`.
+ *   caller writes lands in `record.stdin`. With `{hang: true}` the process
+ *   never ends: communicate_utf8_async answers only once its cancellable
+ *   is cancelled, with a cancellation error; `force_exit` sets
+ *   `record.killed`.
  * - GLib file functions and Gio.File read and write the real file system;
  *   the user directories, `$USER` and the host name come from `fake.env`,
  *   which points at a fresh temporary directory, removed at the next
@@ -267,6 +270,7 @@ const GLib = looseObject({
             r.exit ?? 0];
     },
     get_real_time: () => Date.now() * 1000,
+    get_monotonic_time: () => Math.round(performance.now() * 1000),
     Variant: {new: (type, value) => ({type, value})},
 });
 
@@ -284,11 +288,21 @@ function newSubprocess(argv, flags) {
     const enc = new TextEncoder();
     const later = (proc, cb) => setImmediate(() => cb?.(proc, null));
     const proc = {
-        communicate_utf8_async(input, _c, cb) {
+        communicate_utf8_async(input, c, cb) {
             record.stdin = input;
-            later(proc, cb);
+            if (!answer.hang) {
+                later(proc, cb);
+                return;
+            }
+            c?.connect(() => {
+                res.cancelled = true;
+                later(proc, cb);
+            });
         },
-        communicate_utf8_finish: () => [true, res.stdout, res.stderr],
+        communicate_utf8_finish: () => {
+            if (res.cancelled) throw new Error('Operation was cancelled');
+            return [true, res.stdout, res.stderr];
+        },
         communicate_async(bytes, _c, cb) {
             record.stdin = bytes
                 ? new TextDecoder().decode(bytes.get_data()) : null;
@@ -304,7 +318,7 @@ function newSubprocess(argv, flags) {
         get_exit_status: () => res.exit,
         get_if_exited: () => true,
         get_identifier: () => '4242',
-        force_exit() {},
+        force_exit() { record.killed = true; },
         send_signal() {},
     };
     return proc;
@@ -376,9 +390,24 @@ class FakeFile {
     query_info_finish(res) { return this._finish(res); }
 }
 
+// Like GCancellable: `connect(cb)` runs cb at the cancellation, at once
+// when it is already cancelled.
 class Cancellable {
-    cancel() { this._cancelled = true; }
+    cancel() {
+        if (this._cancelled) return;
+        this._cancelled = true;
+        for (const cb of this._handlers ?? []) cb();
+    }
     is_cancelled() { return !!this._cancelled; }
+    connect(cb) {
+        if (this._cancelled) {
+            cb();
+            return 0;
+        }
+        (this._handlers ??= []).push(cb);
+        return this._handlers.length;
+    }
+    disconnect() {}
 }
 
 const Gio = looseObject({
