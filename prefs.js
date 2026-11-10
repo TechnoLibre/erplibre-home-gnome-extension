@@ -550,20 +550,47 @@ export default class ERPLibreHomePrefs extends ExtensionPreferences {
 
         const list = new Adw.PreferencesGroup({title: _('Destinations')});
         page.add(list);
+        // What a call says once its row has left the list, as a removal
+        // does: the destination's name, then the sentence.
+        const notice = new Adw.ActionRow({title: '', use_markup: false,
+            visible: false});
+        const tell = (label, text) => {
+            notice.set_title(label);
+            notice.set_subtitle(text);
+            notice.set_visible(true);
+        };
+        const empty = new Adw.ActionRow({use_markup: false,
+            title: _('No destination yet: add one below.')});
+        list.add(notice);
+        list.add(empty);
+        // A row lives as long as its destination keeps its id, name, URL
+        // and database: a call in progress keeps the row, the insensitive
+        // buttons and the message line its result goes to.
+        const keyOf = d => JSON.stringify([d.id, d.label, d.url, d.db]);
         let rows = [];
         const refresh = () => {
             for (const r of rows) r.refresh();
         };
         const rebuild = () => {
-            for (const r of rows) list.remove(r.widget);
-            rows = inventory.destinations()
-                .map(d => this._inventoryRow(inventory, d));
-            if (!rows.length) {
-                rows = [{widget: new Adw.ActionRow({
-                    title: _('No destination yet: add one below.')}),
-                refresh() {}}];
+            const wanted = inventory.destinations();
+            const keys = new Set(wanted.map(keyOf));
+            for (const r of rows.filter(x => !keys.has(x.key))) {
+                list.remove(r.widget);
+                r.detach();
             }
-            for (const r of rows) list.add(r.widget);
+            const kept = rows.filter(x => keys.has(x.key));
+            const byKey = new Map(kept.map(r => [r.key, r]));
+            const next = wanted.map(d => byKey.get(keyOf(d)) ??
+                {key: keyOf(d), ...this._inventoryRow(inventory, d, tell)});
+            // The kept rows stay where they are when the new ones come
+            // after them; otherwise every row goes in again, in order.
+            const inPlace = kept.every((r, i) => next[i] === r);
+            if (!inPlace)
+                for (const r of kept) list.remove(r.widget);
+            for (const r of inPlace ? next.slice(kept.length) : next)
+                list.add(r.widget);
+            rows = next;
+            empty.set_visible(!rows.length);
             refresh();
         };
         const add = this._inventoryAddGroup(inventory);
@@ -608,9 +635,12 @@ export default class ERPLibreHomePrefs extends ExtensionPreferences {
      * The row of destination `dest`: its status, the enrollment method
      * and its fields, and the Enroll, Unenroll and Remove buttons. The
      * pairing code, the key and the password are emptied once their call
-     * is over, whatever its outcome. Returns `{widget, refresh}`.
+     * is over, whatever its outcome. A result goes to the row's message
+     * line; once the page has called `detach` (the row left the list, as
+     * on a removal), it goes to `tell(label, text)` instead. Returns
+     * `{widget, refresh, detach}`.
      */
-    _inventoryRow(inventory, dest) {
+    _inventoryRow(inventory, dest, tell) {
         // The title and subtitles carry what the user typed: no markup.
         const row = new Adw.ExpanderRow({title: dest.label,
             subtitle: `${dest.url} · ${dest.db}`, use_markup: false});
@@ -645,9 +675,14 @@ export default class ERPLibreHomePrefs extends ExtensionPreferences {
 
         const message = new Adw.ActionRow({title: '', use_markup: false,
             visible: false});
+        let attached = true;
         const say = text => {
-            message.set_title(text);
-            message.set_visible(text !== '');
+            if (attached) {
+                message.set_title(text);
+                message.set_visible(text !== '');
+            } else if (text !== '') {
+                tell(dest.label, text);
+            }
         };
         const enroll = new Gtk.Button({label: _('Enroll'),
             valign: Gtk.Align.CENTER, css_classes: ['suggested-action']});
@@ -706,6 +741,24 @@ export default class ERPLibreHomePrefs extends ExtensionPreferences {
         unenroll.connect('clicked', () => {
             run(() => inventory.unenroll(dest.id), unenrolled);
         });
+        // The destination is gone even when the keyring failed: its token
+        // may then stay there, out of reach of any Unenroll button.
+        const removed = r => {
+            if (!r.removed) return messageFor(r.error);
+            const said = [_('Destination removed.')];
+            if (r.ok) {
+                said.push(unenrolled(r));
+            } else {
+                said.push(messageFor(r.error),
+                    _('Its token may remain there: delete it from the '
+                        + 'keyring.'));
+                if (!r.revoked) {
+                    said.push(_('If this workstation was enrolled there, '
+                        + 'revoke it in Odoo.'));
+                }
+            }
+            return said.join(' ');
+        };
         // A first click asks for a second one within 5 s.
         let confirmId = 0;
         remove.connect('clicked', () => {
@@ -722,9 +775,12 @@ export default class ERPLibreHomePrefs extends ExtensionPreferences {
             GLib.source_remove(confirmId);
             confirmId = 0;
             remove.set_label(_('Remove'));
-            run(() => inventory.remove(dest.id), unenrolled);
+            run(() => inventory.remove(dest.id), removed);
         });
-        return {widget: row, refresh};
+        const detach = () => {
+            attached = false;
+        };
+        return {widget: row, refresh, detach};
     }
 
     /**

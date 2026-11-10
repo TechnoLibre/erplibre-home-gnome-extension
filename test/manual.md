@@ -118,6 +118,8 @@ and this workstation's Stream Deck.
 - [ ] Revoke the token in Odoo → the status reads « Enrollment revoked »; enroll again → « Up to date »
 - [ ] Unenroll → « Unenrolled: Odoo revoked the token. », the keyring item is gone, Odoo shows the workstation without a token
 - [ ] Remove → asks a second click (« Confirm removal »), then the destination and its file under `~/.local/state/erplibre-home/inventory/` are gone
+- [ ] Stop Odoo, then Remove an enrolled destination → once its row is gone, the top of the list shows its name and « Destination removed. The token is forgotten here, but Odoo did not confirm: revoke this workstation in Odoo. »
+- [ ] Enroll, and add another destination before Odoo answers → the first row keeps its buttons insensitive, then shows the answer in its own row
 - [ ] `LANG=fr_CA.UTF-8 gnome-extensions prefs erplibre-home@technolibre.ca` shows the page as « Inventaire Odoo », in French throughout
 
 ## Cross-cutting (Plan G)

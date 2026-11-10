@@ -1109,6 +1109,15 @@ msgstr "The token is forgotten here, but Odoo did not confirm: revoke this works
 msgid "Not enrolled: there was no token to revoke."
 msgstr "Not enrolled: there was no token to revoke."
 
+msgid "Destination removed."
+msgstr "Destination removed."
+
+msgid "Its token may remain there: delete it from the keyring."
+msgstr "Its token may remain there: delete it from the keyring."
+
+msgid "If this workstation was enrolled there, revoke it in Odoo."
+msgstr "If this workstation was enrolled there, revoke it in Odoo."
+
 msgid "Confirm removal"
 msgstr "Confirm removal"
 

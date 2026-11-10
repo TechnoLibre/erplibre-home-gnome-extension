@@ -1073,6 +1073,15 @@ msgstr ""
 msgid "Not enrolled: there was no token to revoke."
 msgstr ""
 
+msgid "Destination removed."
+msgstr ""
+
+msgid "Its token may remain there: delete it from the keyring."
+msgstr ""
+
+msgid "If this workstation was enrolled there, revoke it in Odoo."
+msgstr ""
+
 msgid "Confirm removal"
 msgstr ""
 

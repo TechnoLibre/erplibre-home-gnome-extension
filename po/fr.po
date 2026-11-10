@@ -1113,6 +1113,15 @@ msgstr "Le jeton est oublié ici, mais Odoo n'a pas confirmé : révoquez ce pos
 msgid "Not enrolled: there was no token to revoke."
 msgstr "Non inscrit : il n'y avait aucun jeton à révoquer."
 
+msgid "Destination removed."
+msgstr "Destination supprimée."
+
+msgid "Its token may remain there: delete it from the keyring."
+msgstr "Son jeton peut y être resté : supprimez-le du trousseau."
+
+msgid "If this workstation was enrolled there, revoke it in Odoo."
+msgstr "Si ce poste y était inscrit, révoquez-le dans Odoo."
+
 msgid "Confirm removal"
 msgstr "Confirmer le retrait"
 

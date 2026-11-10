@@ -454,13 +454,14 @@ test('removing a destination unenrolls it and deletes its state file',
         const m = model();
         const p = m.remove('d1');
         await reply(200, {protocol: '1.0'});
-        assert.deepEqual(await p, {ok: true, revoked: true, error: null});
+        assert.deepEqual(await p, {ok: true, revoked: true, error: null,
+            removed: true});
         assert.deepEqual(stored().map(d => d.id), ['d2']);
         assert.equal(fs.existsSync(stateFile('d1')), false);
         assert.equal(fs.existsSync(stateFile('d2')), true);
         assert.equal(keyring().length, 0);
         assert.deepEqual(await m.remove('d1'),
-            {ok: false, revoked: false, error: 'unknown'});
+            {ok: false, revoked: false, error: 'unknown', removed: false});
     });
 
 test('a destination is removed even when its keyring fails', async () => {
@@ -468,7 +469,8 @@ test('a destination is removed even when its keyring fails', async () => {
     fake.secretError = 'collection is locked';
     const m = model();
     const r = await m.remove('d1');
-    assert.deepEqual(r, {ok: true, revoked: false, error: 'keyring'});
+    assert.deepEqual(r, {ok: false, revoked: false, error: 'keyring',
+        removed: true}, 'not ok: a token may remain in the keyring');
     assert.deepEqual(stored(), []);
 });
 
@@ -578,6 +580,12 @@ function find(root, kind, text) {
     return found[0];
 }
 
+/** The visible widgets of `root` that show a text containing `part`. */
+function showing(root, part) {
+    return tree(root).filter(w => w.visible &&
+        texts(w).some(t => t.includes(part)));
+}
+
 function page(m = model()) {
     return new Prefs({uuid: 'erplibre-home@technolibre.ca'})
         ._buildInventoryPage(settings, m);
@@ -598,6 +606,23 @@ test('the page is titled Odoo inventory and lists the destinations', () => {
     setDestinations([dest()]);
     assert.equal(tree(p).filter(w => w.kind === 'Adw.ExpanderRow').length, 1,
         'the list follows the settings');
+    setDestinations([dest(), dest({id: 'd2', label: 'Lab & test',
+        db: 'other'})]);
+    setDestinations([dest({id: 'd2', label: 'Lab & test', db: 'other'}),
+        dest()]);
+    assert.deepEqual(tree(p).filter(w => w.kind === 'Adw.ExpanderRow')
+        .map(r => r.props.title), ['Lab & test', 'Head office'],
+    'and its order');
+});
+
+test('an empty list says how to add a destination', () => {
+    const p = page();
+    const hint = 'No destination yet: add one below.';
+    assert.equal(showing(p, hint).length, 1);
+    setDestinations([dest()]);
+    assert.equal(showing(p, hint).length, 0);
+    setDestinations([]);
+    assert.equal(showing(p, hint).length, 1);
 });
 
 test('prefs.js shows the inventory page after the device page', () => {
@@ -706,6 +731,89 @@ test('unenroll and remove are buttons of each destination', async () => {
     remove.emit('clicked');
     await settle(40);
     assert.deepEqual(stored(), []);
+});
+
+test('a removal says on the page what became of the token, once its row '
+    + 'is gone', async () => {
+    setDestinations([dest(), dest({id: 'd2', label: 'Branch', db: 'other'})]);
+    seedToken();
+    const p = page();
+    const row = find(p, 'Adw.ExpanderRow', 'Head office');
+    const remove = find(row, 'Gtk.Button', 'Remove');
+    remove.emit('clicked');
+    remove.emit('clicked');
+    await reply(502);
+    await settle(40);
+    assert.deepEqual(stored().map(d => d.id), ['d2']);
+    assert.equal(keyring().length, 0);
+    assert.deepEqual(tree(p).filter(w => w.kind === 'Adw.ExpanderRow')
+        .map(r => r.props.title), ['Branch']);
+    const said = showing(p, 'revoke this workstation in Odoo');
+    assert.equal(said.length, 1, 'the page says Odoo did not confirm');
+    assert.ok(texts(said[0]).includes('Head office'), 'and of which Odoo');
+    assert.ok(texts(said[0]).some(t => t.includes(
+        inv.messageFor('network'))));
+});
+
+test('a removal whose keyring fails says the token may remain', async () => {
+    setDestinations([dest()]);
+    fake.secretError = 'collection is locked';
+    const p = page();
+    const remove = find(p, 'Gtk.Button', 'Remove');
+    remove.emit('clicked');
+    remove.emit('clicked');
+    await settle(40);
+    assert.deepEqual(stored(), []);
+    const said = showing(p, inv.messageFor('keyring'));
+    assert.equal(said.length, 1);
+    assert.ok(texts(said[0]).includes('Head office'));
+    assert.ok(!texts(said[0]).some(t => t.includes('forgotten')),
+        'a token the keyring kept is not said forgotten');
+    assert.ok(texts(said[0]).some(t => t.includes('may remain')));
+});
+
+test('a removal Odoo confirmed but the keyring kept says only to delete '
+    + 'the token', async () => {
+    setDestinations([dest()]);
+    seedToken();
+    const p = page(model({clearToken: async () => {
+        throw new Error('collection is locked');
+    }}));
+    const remove = find(p, 'Gtk.Button', 'Remove');
+    remove.emit('clicked');
+    remove.emit('clicked');
+    await reply(200, {protocol: '1.0'});
+    await settle(40);
+    const [said] = showing(p, 'may remain');
+    assert.ok(said, 'the token may remain in the keyring');
+    assert.ok(!texts(said).some(t => t.includes('revoke it in Odoo')),
+        'Odoo revoked it already');
+});
+
+test('a call in progress keeps its row and its result when the list '
+    + 'changes', async () => {
+    setDestinations([dest()]);
+    const m = model();
+    const p = page(m);
+    const row = find(p, 'Adw.ExpanderRow', 'Head office');
+    find(row, 'Adw.EntryRow', 'Pairing code').set_text('ABCDEFGH');
+    find(row, 'Gtk.Button', 'Enroll').emit('clicked');
+    await settle();
+    assert.equal(m.add({url: 'https://branch.example.invalid', db: 'base',
+        label: 'Branch'}).ok, true);
+    const now = find(p, 'Adw.ExpanderRow', 'Head office');
+    assert.equal(find(now, 'Gtk.Button', 'Enroll').sensitive, false,
+        'the call is still running');
+    p.emit('unmap');
+    p.emit('map');
+    await reply(401, {error: 'credentials_refused'});
+    await settle();
+    const after = find(p, 'Adw.ExpanderRow', 'Head office');
+    assert.equal(find(after, 'Gtk.Button', 'Enroll').sensitive, true);
+    assert.equal(showing(after, inv.messageFor('credentials_refused')).length,
+        1, 'the result shows in the row of its destination');
+    assert.deepEqual(tree(p).filter(w => w.kind === 'Adw.ExpanderRow')
+        .map(r => r.props.title), ['Head office', 'Branch']);
 });
 
 test('the statuses refresh every POLL_S while the page is shown', async () => {
