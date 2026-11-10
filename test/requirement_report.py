@@ -284,8 +284,9 @@ class Registry:
         home directory replaced by « ~ ». None stays None.
 
         A path is replaced only whole: `/repo` touches neither `/repo2` nor
-        `/x/repo`. The root goes before the home directory, which usually
-        holds it."""
+        `/x/repo`. A `file://` URL of such a path, as in a node stack,
+        becomes the same relative path rather than a URL without its root.
+        The root goes before the home directory, which usually holds it."""
         if not log:
             return log
         if self.key:
@@ -294,12 +295,13 @@ class Registry:
             (os.path.abspath(root), "", "."),
             (os.path.expanduser("~"), "~/", "~"),
         ):
-            path = re.escape(str(path).rstrip(os.sep))
+            path = str(path).rstrip(os.sep)
             if not path:
                 continue
-            before = r"(?<![\w.-])"
-            log = re.sub(before + path + re.escape(os.sep), below, log)
-            log = re.sub(before + path + r"(?![\w.-])", alone, log)
+            url = "file://" + urllib.parse.quote(path)
+            path = rf"(?<![\w.-])(?:{re.escape(url)}|{re.escape(path)})"
+            log = re.sub(path + re.escape(os.sep), below, log)
+            log = re.sub(path + r"(?![\w.-])", alone, log)
         return log
 
     def _call(self, service, method, args):

@@ -17,6 +17,7 @@ import importlib.util
 import io
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -295,6 +296,7 @@ class TestEnvironment(unittest.TestCase):
             "http://192.0.2.10:8069",
             "http://localhost.invalid",
             "ftp://registry.invalid",
+            f"http://runner:{KEY}@192.0.2.10:8069/?key={KEY}",
         ):
             with self.subTest(url=url):
                 registry, out = self.config(
@@ -303,6 +305,7 @@ class TestEnvironment(unittest.TestCase):
                 self.assertIsNone(registry)
                 self.assertEqual(out.count("\n"), 1)
                 self.assertNotIn(KEY, out)
+                self.assertNotIn("runner", out)
 
 
 class TestPush(unittest.TestCase):
@@ -410,6 +413,21 @@ class TestPush(unittest.TestCase):
             'File "test/python/test_a.py", line 3\n'
             "key *** in ~/.cache/x\n"
             f"~/repo2/other /x{root}",
+        )
+
+    def test_a_file_url_of_a_stack_becomes_a_relative_path(self):
+        root = Path("/srv/invented account/repo")
+        registry = rr.Registry("https://registry.invalid/", "r", "u", KEY)
+        with mock.patch.dict(os.environ, {"HOME": "/srv/invented account"}):
+            log = registry._neutralize(
+                "at t (file:///srv/invented%20account/repo/test/unit/"
+                "a.test.js:23:56)\n"
+                "at u (file:///srv/invented%20account/lib/x.js:1:2)",
+                root,
+            )
+        self.assertEqual(
+            log,
+            "at t (test/unit/a.test.js:23:56)\nat u (~/lib/x.js:1:2)",
         )
 
 
@@ -545,6 +563,40 @@ class TestUnittestNotes(unittest.TestCase):
         self.assertEqual(scrub(noted.stderr), scrub(plain.stderr))
         self.assertEqual(noted.stdout, plain.stdout)
 
+    def test_the_tests_import_from_the_working_directory_first(self):
+        # As with `python3 -m unittest`: the working directory, not the
+        # directory of unittest_notes.py, heads the import path.
+        (self.root / "invented_helper.py").write_text(
+            "VALUE = 4\n", encoding="utf-8"
+        )
+        (self.root / "test/python/test_cwd.py").write_text(
+            "import unittest\n"
+            "import invented_helper\n\n\n"
+            "class C(unittest.TestCase):\n"
+            "    def test_value(self):\n"
+            "        self.assertEqual(invented_helper.VALUE, 4)\n",
+            encoding="utf-8",
+        )
+        out = self.root / "notes.json"
+        run = self.run_in(
+            [
+                sys.executable,
+                str(self.NOTES),
+                str(out),
+                "discover",
+                "-s",
+                "test/python",
+                "-p",
+                "test_cwd.py",
+            ]
+        )
+        self.assertEqual(run.returncode, 0, run.stderr)
+        notes = json.loads(out.read_text(encoding="utf-8"))
+        self.assertEqual(
+            [(n["class"], n["test"], n["result"]) for n in notes],
+            [("C", "test_value", "passed")],
+        )
+
 
 class FakeServer:
     """FakeRegistry served over HTTP on 127.0.0.1, port chosen by the OS."""
@@ -640,7 +692,7 @@ class TestRunSuites(unittest.TestCase):
         # Without a registry main would exec the suites in place of this
         # test process: that must fail the test instead.
         with mock.patch.object(
-            rs.os, "execvp", side_effect=AssertionError("no registry")
+            rs.os, "execvpe", side_effect=AssertionError("no registry")
         ):
             code = rs.main(
                 root=root, env={**base, **env}, out=out, stdio=stdio
@@ -648,32 +700,85 @@ class TestRunSuites(unittest.TestCase):
         stdio.seek(0)
         return code, out.getvalue(), stdio.read()
 
-    def test_without_the_registry_the_suites_run_as_before(self):
+    def exec_main(self, env, out):
+        """The arguments main passes to os.execvpe, which is stopped."""
+
         class Exec(Exception):
             pass
 
-        out = mock.Mock()
         with mock.patch.object(
-            rs.os, "execvp", side_effect=Exec
-        ) as execvp, mock.patch.object(
+            rs.os, "execvpe", side_effect=Exec
+        ) as execvpe, mock.patch.object(
             rs.os, "chdir"
         ) as chdir, mock.patch.object(
             rr.urllib.request, "urlopen"
         ) as urlopen:
             with self.assertRaises(Exec):
-                rs.main(env={}, out=out)
-        execvp.assert_called_once_with(
-            "sh",
-            [
-                "sh",
-                "-c",
-                "node --test test/unit/*.test.js"
-                " && python3 -m unittest discover -s test/python",
-            ],
-        )
+                rs.main(env=env, out=out)
         chdir.assert_called_once_with(rs.ROOT)
-        out.flush.assert_called()
         urlopen.assert_not_called()
+        execvpe.assert_called_once()
+        return execvpe.call_args.args
+
+    def test_without_the_registry_the_suites_run_as_before(self):
+        out = mock.Mock()
+        args = self.exec_main({"OTHER": "kept"}, out)
+        self.assertEqual(
+            args,
+            (
+                "sh",
+                [
+                    "sh",
+                    "-c",
+                    "node --test test/unit/*.test.js"
+                    " && python3 -m unittest discover -s test/python",
+                ],
+                {"OTHER": "kept"},
+            ),
+        )
+        out.flush.assert_called()
+
+    def test_a_partial_or_refused_registry_keeps_its_variables_away(self):
+        for env in (
+            {"ERPLIBRE_REQUIREMENT_KEY": KEY},
+            {**ENV, "ERPLIBRE_REQUIREMENT_URL": "http://192.0.2.10:8069"},
+        ):
+            with self.subTest(variables=sorted(env)):
+                out = io.StringIO()
+                _, _, children = self.exec_main({**env, "OTHER": "kept"}, out)
+                self.assertEqual(children, {"OTHER": "kept"})
+                self.assertEqual(out.getvalue().count("\n"), 1)
+                self.assertNotIn(KEY, out.getvalue())
+
+    def test_an_interrupt_between_the_suites_sends_nothing(self):
+        out = io.StringIO()
+        with mock.patch.object(
+            rs, "node_major", side_effect=KeyboardInterrupt
+        ), mock.patch.object(rs, "_run") as run, mock.patch.object(
+            rr.urllib.request, "urlopen"
+        ) as urlopen:
+            code = rs.main(root=_tmp(self), env=ENV, out=out)
+        self.assertEqual(code, 130)
+        run.assert_not_called()
+        urlopen.assert_not_called()
+        self.assertIn("no verdict sent", out.getvalue())
+
+    def test_the_suites_receive_neither_the_registry_nor_a_test_context(self):
+        env = {**ENV, "NODE_TEST_CONTEXT": "child-v8", "OTHER": "kept"}
+        with mock.patch.object(
+            rs, "_run", return_value=130
+        ) as run, mock.patch.object(rs, "node_major", return_value=22):
+            rs.main(root=_tmp(self), env=env, out=io.StringIO())
+        self.assertEqual(run.call_args.args[2], {"OTHER": "kept"})
+
+    def test_a_child_killed_by_a_signal_gives_128_plus_its_number(self):
+        code = rs._run(
+            "kill -TERM $$",
+            _tmp(self),
+            {"PATH": os.environ.get("PATH", "")},
+            subprocess.DEVNULL,
+        )
+        self.assertEqual(code, 128 + signal.SIGTERM)
 
     def test_each_declared_test_gets_the_verdict_of_this_run(self):
         root = self.make_repo()
@@ -773,7 +878,7 @@ class TestRunSuites(unittest.TestCase):
         self.assertIn("no verdict sent", out.getvalue())
 
     def test_the_node_command_keeps_its_files_and_adds_the_reporters(self):
-        command = rs.node_command(Path("/tmp/n.jsonl"), tty=False)
+        command = rs.node_command(Path("/tmp/n.jsonl"), "tap")
         self.assertTrue(
             command.startswith(
                 "node --test --test-reporter=tap"
@@ -782,10 +887,22 @@ class TestRunSuites(unittest.TestCase):
             )
         )
         self.assertTrue(command.endswith(" test/unit/*.test.js"))
-        self.assertIn(
-            "--test-reporter=spec",
-            rs.node_command(Path("/tmp/n.jsonl"), tty=True),
-        )
+
+    def test_the_reporter_is_the_one_node_would_choose(self):
+        for tty, major, reporter in (
+            (True, 22, "spec"),
+            (False, 22, "tap"),
+            (False, None, "tap"),
+            (False, 23, "spec"),
+            (False, 24, "spec"),
+        ):
+            with self.subTest(tty=tty, major=major):
+                self.assertEqual(rs.default_reporter(tty, major), reporter)
+
+    def test_the_node_version_is_read_from_the_node_the_suites_use(self):
+        self.assertIsInstance(rs.node_major(_tmp(self), os.environ), int)
+        empty = _tmp(self)
+        self.assertIsNone(rs.node_major(empty, {"PATH": str(empty)}))
 
 
 if __name__ == "__main__":

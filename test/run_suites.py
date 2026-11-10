@@ -9,13 +9,13 @@ The two suites are COMMAND: the node suite, then, when it passes, the
 Python suite, from the repository root. Without the requirement registry
 (none of the ERPLIBRE_REQUIREMENT_* variables of requirement_report.py),
 this process becomes `sh -c COMMAND`: same output, same exit code, no
-connection.
+connection. The suites never receive the registry variables, even when
+some only are set or the URL is refused.
 
 With the registry, each suite runs with a note per test: the node suite
-with test/requirement-reporter.mjs beside its usual reporter (spec on a
-terminal, tap otherwise, as node chooses), the Python suite through
-unittest_notes.py, which prints what `python3 -m unittest` prints. The
-suites do not receive the registry variables. Once they are over, the
+with test/requirement-reporter.mjs beside the reporter node would choose
+(default_reporter), the Python suite through unittest_notes.py, which
+prints what `python3 -m unittest` prints. Once they are over, the
 verdicts go to the registry and one line says how it went; the exit code
 is the suites' own. A suite that ends without writing any note (a crash,
 a missing interpreter) gives an error to each file it would have run, so
@@ -27,6 +27,7 @@ nothing.
 import glob
 import json
 import os
+import re
 import shlex
 import signal
 import subprocess
@@ -53,13 +54,44 @@ PYTHON_FILES = PYTHON_COMMAND.rpartition(" ")[2] + "/test*.py"
 
 INTERRUPTED = 130
 
+# The first node major version whose default reporter is spec whatever the
+# output; before it, spec on a terminal and tap otherwise.
+SPEC_ALWAYS = 23
 
-def node_command(notes, tty):
-    """NODE_COMMAND with node's usual reporter on standard output and the
-    requirement reporter writing its notes to `notes`."""
+
+def default_reporter(tty, major):
+    """The reporter node --test uses when none is given: `tty` tells
+    whether its output is a terminal, `major` is node's major version,
+    None when unknown (then that of the versions before SPEC_ALWAYS)."""
+    if tty or (major is not None and major >= SPEC_ALWAYS):
+        return "spec"
+    return "tap"
+
+
+def node_major(root, env):
+    """The major version of the `node` that `sh -c` finds with `env`, or
+    None when it does not answer."""
+    try:
+        version = subprocess.run(
+            ["sh", "-c", "node --version"],
+            cwd=root,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    match = re.match(r"v(\d+)\.", version.strip())
+    return int(match.group(1)) if match else None
+
+
+def node_command(notes, reporter):
+    """NODE_COMMAND with `reporter` on standard output and the requirement
+    reporter writing its notes to `notes`."""
     head, _, files = NODE_COMMAND.rpartition(" ")
     flags = [
-        "--test-reporter=" + ("spec" if tty else "tap"),
+        "--test-reporter=" + reporter,
         "--test-reporter-destination=stdout",
         "--test-reporter=" + REPORTER,
         "--test-reporter-destination=" + str(notes),
@@ -162,9 +194,12 @@ def _run_noted(root, env, out, stdio):
     notes = []
     with tempfile.TemporaryDirectory(prefix="run-suites-") as tmp:
         node_notes = os.path.join(tmp, "node.jsonl")
-        tty = _isatty(stdio if stdio is not None else sys.stdout)
+        reporter = default_reporter(
+            _isatty(stdio if stdio is not None else sys.stdout),
+            node_major(root, env),
+        )
         out.flush()
-        code = _run(node_command(node_notes, tty), root, env, stdio)
+        code = _run(node_command(node_notes, reporter), root, env, stdio)
         found = _node_notes(node_notes)
         if code not in (0, INTERRUPTED) and not found:
             found = _died(
@@ -202,23 +237,34 @@ def main(root=ROOT, env=None, out=None, stdio=None):
     env = os.environ if env is None else env
     out = out or sys.stdout
     registry = requirement_report.from_environment(env, out=out)
+    # A test that prints its environment must not reveal the key, whether
+    # the registry is configured, partial or refused.
+    plain = {
+        name: value
+        for name, value in env.items()
+        if name not in requirement_report.VARIABLES
+    }
     if registry is None:
         # exec drops Python's buffers: a warning line printed above must
         # leave before.
         out.flush()
         os.chdir(root)
-        os.execvp("sh", ["sh", "-c", COMMAND])
-    # A test that prints its environment must not reveal the key; a
-    # node --test started inside a node test inherits NODE_TEST_CONTEXT.
+        os.execvpe("sh", ["sh", "-c", COMMAND], plain)
+    # A node --test started inside a node test inherits NODE_TEST_CONTEXT,
+    # which would make it report to its parent instead of its reporters.
     children = {
         name: value
-        for name, value in env.items()
-        if name not in requirement_report.VARIABLES
-        and name != "NODE_TEST_CONTEXT"
+        for name, value in plain.items()
+        if name != "NODE_TEST_CONTEXT"
     }
     previous = signal.signal(signal.SIGTERM, _interrupt)
     try:
-        code, notes = _run_noted(root, children, out, stdio)
+        try:
+            code, notes = _run_noted(root, children, out, stdio)
+        except KeyboardInterrupt:
+            # Ctrl+C or SIGTERM outside _run (node --version, between the
+            # suites) interrupts the run the same way.
+            code, notes = INTERRUPTED, []
         if code == INTERRUPTED:
             requirement_report.warn(
                 "suites interrupted, no verdict sent.", out=out

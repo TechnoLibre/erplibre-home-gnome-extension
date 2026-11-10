@@ -97,7 +97,13 @@ export class Notes {
             result = 'skipped';
         else if (failed)
             result = failureResult(error);
+        // A skip or todo given as a string is its reason, the log of the
+        // skipped verdict; `true` gives none.
+        const reason = [data.skip, data.todo]
+            .find((value) => typeof value === 'string');
         const logs = [];
+        if (result === 'skipped' && reason)
+            logs.push(reason);
         if (failed && result !== 'skipped')
             logs.push(errorText(error));
         logs.push(...(this._pending.get(file) ?? []));
