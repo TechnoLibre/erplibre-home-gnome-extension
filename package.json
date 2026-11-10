@@ -1,0 +1,11 @@
+{
+  "name": "erplibre-home-gnome-extension",
+  "description": "ERPLibre Home, a GNOME Shell extension: tests only, nothing to install",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "repository": "github:TechnoLibre/erplibre-home-gnome-extension",
+  "scripts": {
+    "test": "node --test test/unit/*.test.js && python3 -m unittest discover -s test/python"
+  }
+}
