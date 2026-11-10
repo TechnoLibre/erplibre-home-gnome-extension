@@ -154,6 +154,18 @@ msgstr ""
 msgid "🔄 Re-scan USB"
 msgstr ""
 
+msgid "Inventory: up to date"
+msgstr ""
+
+msgid "Inventory: offline ({n} pending)"
+msgstr ""
+
+msgid "Inventory: refused"
+msgstr ""
+
+msgid "Inventory: enrollment revoked"
+msgstr ""
+
 msgid "Status"
 msgstr ""
 
@@ -903,4 +915,196 @@ msgid "today"
 msgstr ""
 
 msgid "yesterday"
+msgstr ""
+
+msgid "ERPLibre Home inventory: {label}"
+msgstr ""
+
+msgid "Not a valid address: give an http or https URL, without a query or a fragment."
+msgstr ""
+
+msgid "Only http and https addresses are accepted."
+msgstr ""
+
+msgid "Remove the user name and password from the address: the settings would keep them."
+msgstr ""
+
+msgid "Plain HTTP is accepted only to this machine: use https."
+msgstr ""
+
+msgid "Not a database name Odoo accepts."
+msgstr ""
+
+msgid "This Odoo and database already are a destination."
+msgstr ""
+
+msgid "This destination or instance no longer exists."
+msgstr ""
+
+msgid "Fill in every field of the chosen method."
+msgstr ""
+
+msgid "A pairing code has 8 letters and digits."
+msgstr ""
+
+msgid "A value is longer than Odoo accepts."
+msgstr ""
+
+msgid "Odoo refused the request as malformed."
+msgstr ""
+
+msgid "This Odoo speaks another version of the inventory protocol: update the extension or the Odoo module."
+msgstr ""
+
+msgid "Odoo refused these credentials: wrong, expired or already used."
+msgstr ""
+
+msgid "This Odoo user is archived or may not use Stream Deck."
+msgstr ""
+
+msgid "Odoo no longer accepts the enrollment of this workstation."
+msgstr ""
+
+msgid "Odoo did not answer."
+msgstr ""
+
+msgid "Odoo has no inventory route here: check the database and that the Stream Deck module is installed."
+msgstr ""
+
+msgid "Odoo gave an unexpected answer."
+msgstr ""
+
+msgid "The GNOME keyring could not be used."
+msgstr ""
+
+msgid "This machine has no readable /etc/machine-id."
+msgstr ""
+
+msgid "A call to this Odoo is already in progress."
+msgstr ""
+
+msgid "Error: {code}"
+msgstr ""
+
+msgid "Last report: {time}"
+msgstr ""
+
+msgid "Enrolled, waiting for the first report"
+msgstr ""
+
+msgid "The extension reports within a few seconds."
+msgstr ""
+
+msgid "Up to date"
+msgstr ""
+
+msgid "Offline ({n} pending)"
+msgstr ""
+
+msgid "Enrollment revoked"
+msgstr ""
+
+msgid "Enroll again to resume the reports."
+msgstr ""
+
+msgid "Refused"
+msgstr ""
+
+msgid "Not enrolled"
+msgstr ""
+
+msgid "Enroll with a pairing code, an API key, or a login and password."
+msgstr ""
+
+msgid "Odoo inventory"
+msgstr ""
+
+msgid "This workstation reports its Stream Decks and its deck service to each Odoo below, which needs the Stream Deck module. The token Odoo returns stays in the GNOME keyring; a key or a password typed here is sent once and never kept."
+msgstr ""
+
+msgid "Destinations"
+msgstr ""
+
+msgid "No destination yet: add one below."
+msgstr ""
+
+msgid "Pairing code"
+msgstr ""
+
+msgid "API key"
+msgstr ""
+
+msgid "Login and password"
+msgstr ""
+
+msgid "Enrollment method"
+msgstr ""
+
+msgid "Odoo gives a pairing code under Stream Deck › My workstations › Add a workstation."
+msgstr ""
+
+msgid "Login"
+msgstr ""
+
+msgid "Password"
+msgstr ""
+
+msgid "Enroll"
+msgstr ""
+
+msgid "Unenroll"
+msgstr ""
+
+msgid "Remove"
+msgstr ""
+
+msgid "Enrollment"
+msgstr ""
+
+msgid "Enrolled: the extension reports within a few seconds."
+msgstr ""
+
+msgid "Unenrolled: Odoo revoked the token."
+msgstr ""
+
+msgid "The token is forgotten here, but Odoo did not confirm: revoke this workstation in Odoo."
+msgstr ""
+
+msgid "Not enrolled: there was no token to revoke."
+msgstr ""
+
+msgid "Destination removed."
+msgstr ""
+
+msgid "Its token may remain there: delete it from the keyring."
+msgstr ""
+
+msgid "If this workstation was enrolled there, revoke it in Odoo."
+msgstr ""
+
+msgid "Confirm removal"
+msgstr ""
+
+msgid "Add a destination"
+msgstr ""
+
+msgid "Plain HTTP is accepted only to this machine (a local instance, an SSH tunnel); use https anywhere else."
+msgstr ""
+
+msgid "Odoo instance"
+msgstr ""
+
+msgid "Database"
+msgstr ""
+
+msgid "Name (optional)"
+msgstr ""
+
+msgid "Add"
+msgstr ""
+
+msgid "Add this destination"
+msgstr ""
+
+msgid "Other, by URL"
 msgstr ""

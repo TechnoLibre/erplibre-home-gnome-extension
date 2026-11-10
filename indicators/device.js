@@ -7,7 +7,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
-import {detectStreamDecksGjs} from '../lib/usb.js';
+import {inventorySummary} from '../lib/inventory-service.js';
 import {spawnDetached, runProcess} from '../lib/spawn.js';
 import {makeBadgedIcon, bindBadgeOrientation, attachHoverTooltip,
     formatBadgeTooltip} from '../lib/badges.js';
@@ -31,17 +31,23 @@ const _GTYPE_SUFFIX = Math.floor(Math.random() * 1e9).toString(36);
 export const DeviceIndicator = GObject.registerClass(
 {GTypeName: `SDT_DeviceIndicator_${_GTYPE_SUFFIX}`},
 class DeviceIndicator extends PanelMenu.Button {
-    _init({extension, openPrefs, iconName = 'input-tablet-symbolic'} = {}) {
+    // `inventory` is the extension's InventoryService: the indicator shows
+    // its decks and its status, and never scans USB itself.
+    _init({extension, openPrefs, inventory = null,
+        iconName = 'input-tablet-symbolic'} = {}) {
         super._init(0.0, 'Stream Deck Device');
         this._extension = extension;
         this._openPrefs = openPrefs;
+        this._inventory = inventory;
         this._settings = extension.getSettings();
         this._cache = [];
         // GLib sources of the waits _driveUnit runs after a start.
         this._settleIds = new Set();
         this._badged = makeBadgedIcon({St, Gio, Clutter, iconName});
         this.add_child(this._badged.actor);
-        this._rescanThenRebuild();
+        this._sigInventory = inventory?.connect('changed',
+            () => this._refresh()) ?? 0;
+        this._refresh();
         this._sigTimer = this._settings.connect(
             'changed::device-auto-refresh-sec', () => this._resetTimer());
         this._sigBadges = this._settings.connect(
@@ -69,6 +75,8 @@ class DeviceIndicator extends PanelMenu.Button {
         this._sigBadges = 0;
         if (this._sigOrient) this._settings.disconnect(this._sigOrient);
         this._sigOrient = 0;
+        if (this._sigInventory) this._inventory?.disconnect(this._sigInventory);
+        this._sigInventory = 0;
         this._tip?.detach();
         super.destroy();
     }
@@ -100,10 +108,38 @@ class DeviceIndicator extends PanelMenu.Button {
         }
     }
 
-    async _rescanThenRebuild() {
-        this._cache = await detectStreamDecksGjs();
+    // Asks the service for a scan; its 'changed' signal rebuilds the menu
+    // when the decks differ.
+    _rescanThenRebuild() {
+        this._inventory?.rescan();
+        this._refresh();
+    }
+
+    // Rebuilds the menu when the decks or the inventory line changed: the
+    // service signals every report, and a rebuild under an open menu
+    // closes what the user had open.
+    _refresh() {
+        const decks = this._inventory?.decks() ?? [];
+        const shown = JSON.stringify([decks, this._inventoryLine()]);
+        if (shown === this._shown) return;
+        this._shown = shown;
+        this._cache = decks;
         this._rebuildMenu();
         this._refreshBadge();
+    }
+
+    // The inventory line: null when no destination is enrolled.
+    _inventoryLine() {
+        const summary = inventorySummary(this._inventory?.statuses() ?? []);
+        if (summary === null) return null;
+        if (summary.kind === 'revoked')
+            return _('Inventory: enrollment revoked');
+        if (summary.kind === 'refused')
+            return _('Inventory: refused');
+        if (summary.kind === 'offline')
+            return _('Inventory: offline ({n} pending)')
+                .replace('{n}', summary.pending);
+        return _('Inventory: up to date');
     }
 
     _rebuildMenu() {
@@ -114,6 +150,11 @@ class DeviceIndicator extends PanelMenu.Button {
         } else {
             for (const d of this._cache)
                 this.menu.addMenuItem(this._row(d));
+        }
+        const line = this._inventoryLine();
+        if (line !== null) {
+            this.menu.addMenuItem(new PopupMenu.PopupMenuItem(line,
+                {reactive: false}));
         }
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         const rescan = new PopupMenu.PopupMenuItem(_('🔄 Re-scan USB'));
@@ -132,7 +173,7 @@ class DeviceIndicator extends PanelMenu.Button {
         status.connect('activate', () => _notify(dev.product || 'Stream Deck',
             `Bus ${dev.bus} Device ${dev.device}\n` +
             `Vendor: ${dev.vendor_name}\n` +
-            `Serial: ${dev.serial}`));
+            `Serial: ${dev.serial || '?'}`));
         sub.menu.addMenuItem(status);
 
         const open = new PopupMenu.PopupMenuItem(_('Start deck program'));

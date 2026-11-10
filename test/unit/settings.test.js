@@ -6,7 +6,7 @@ import {fake, makeSettings, schemaDefaults} from './gjs-fake.js';
 import {parseList, serializeList, pushRecent, MAX_RECENT}
     from '../../lib/settings.js';
 import {migrateLegacyJson, parseObject, runMigrationGjs,
-    exportSettingsAsObj} from '../../lib/settings.js';
+    exportSettingsAsObj, SCHEMA_KEYS} from '../../lib/settings.js';
 
 test('parseList returns [] on bad JSON', () => {
     assert.deepEqual(parseList('not json'), []);
@@ -111,6 +111,7 @@ test('the catalogue, indicator, sync and migration defaults', () => {
         'network-read-ssh-config': ['b', true],
         'network-auto-refresh-sec': ['i', 0],
         'device-auto-refresh-sec': ['i', 0],
+        'inventory-destinations': ['s', '[]'],
         'icon-overrides': ['s', '{}'],
         'enable-git-sync': ['b', false],
         'git-sync-path': ['s', ''],
@@ -119,6 +120,16 @@ test('the catalogue, indicator, sync and migration defaults', () => {
     };
     for (const [name, [type, value]] of Object.entries(expected))
         assert.deepEqual(keys.get(name), {type, value}, name);
+});
+
+test('the inventory destinations stay out of the git sync', () => {
+    // Each workstation enrolls on its own: a destination copied to another
+    // machine would show there without its token.
+    assert.ok(schemaDefaults().has('inventory-destinations'));
+    assert.ok(!SCHEMA_KEYS.includes('inventory-destinations'));
+    const exported = exportSettingsAsObj(makeSettings({
+        'inventory-destinations': '[{"id":"d1"}]'}));
+    assert.ok(!('inventory-destinations' in exported.settings));
 });
 
 function legacyFile() {

@@ -13,6 +13,9 @@ import {exportSettingsAsObj, importSettingsFromObj, resetAllSettings,
 import {readLogTail, clearLog} from './lib/log.js';
 import {defaultMediaEntry as defaultFilmEntry, normaliseMediaUrl}
     from './lib/media-helpers.js';
+import {POLL_S, ENROLL_METHODS} from './lib/inventory.js';
+import {InventoryPrefs, messageFor, statusText}
+    from './lib/inventory-prefs.js';
 
 // Labels resolved at fillPreferencesWindow() time so _() is wired.
 const INDICATOR_IDS = [
@@ -71,6 +74,7 @@ export default class ERPLibreHomePrefs extends ExtensionPreferences {
         window.add(this._buildErpLibrePage(settings));
         window.add(this._buildNetworkPage(settings));
         window.add(this._buildDevicePage(settings));
+        window.add(this._buildInventoryPage(settings));
         window.add(this._buildThemingPage(settings));
         window.add(this._buildAdvancedPage(settings));
         window.add(this._buildSyncPage(settings));
@@ -520,6 +524,345 @@ export default class ERPLibreHomePrefs extends ExtensionPreferences {
         opts.add(refreshRow);
         page.add(opts);
         return page;
+    }
+
+    /**
+     * The « Odoo inventory » page: the destinations the inventory service
+     * reports to, each with its status, enrollment and removal, then the
+     * form that adds one. All of it goes through `inventory`
+     * (lib/inventory-prefs.js). While the page is shown, the statuses are
+     * read again every POLL_S seconds and the page follows the settings;
+     * once hidden it holds no timer and no settings handler. Every row
+     * has `use_markup: false`: names, URLs and translations show as
+     * written, an `&` included.
+     */
+    _buildInventoryPage(settings, inventory = new InventoryPrefs({settings})) {
+        const page = new Adw.PreferencesPage({
+            title: _('Odoo inventory'),
+            icon_name: 'network-transmit-receive-symbolic',
+        });
+        page.add(new Adw.PreferencesGroup({
+            title: _('Odoo inventory'),
+            description: _('This workstation reports its Stream Decks and '
+                + 'its deck service to each Odoo below, which needs the '
+                + 'Stream Deck module. The token Odoo returns stays in the '
+                + 'GNOME keyring; a key or a password typed here is sent '
+                + 'once and never kept.'),
+        }));
+
+        const list = new Adw.PreferencesGroup({title: _('Destinations')});
+        page.add(list);
+        // What a call says once its row has left the list, as a removal
+        // does: the destination's name, then the sentence.
+        const notice = new Adw.ActionRow({title: '', use_markup: false,
+            visible: false});
+        const tell = (label, text) => {
+            notice.set_title(label);
+            notice.set_subtitle(text);
+            notice.set_visible(true);
+        };
+        const empty = new Adw.ActionRow({use_markup: false,
+            title: _('No destination yet: add one below.')});
+        list.add(notice);
+        list.add(empty);
+        // A row lives as long as its destination keeps its id, name, URL
+        // and database: a call in progress keeps the row, the insensitive
+        // buttons and the message line its result goes to.
+        const keyOf = d => JSON.stringify([d.id, d.label, d.url, d.db]);
+        let rows = [];
+        const refresh = () => {
+            for (const r of rows) r.refresh();
+        };
+        const rebuild = () => {
+            const wanted = inventory.destinations();
+            const keys = new Set(wanted.map(keyOf));
+            for (const r of rows.filter(x => !keys.has(x.key))) {
+                list.remove(r.widget);
+                r.detach();
+            }
+            const kept = rows.filter(x => keys.has(x.key));
+            const byKey = new Map(kept.map(r => [r.key, r]));
+            const next = wanted.map(d => byKey.get(keyOf(d)) ??
+                {key: keyOf(d), ...this._inventoryRow(inventory, d, tell)});
+            // The kept rows stay where they are when the new ones come
+            // after them; otherwise every row goes in again, in order.
+            const inPlace = kept.every((r, i) => next[i] === r);
+            if (!inPlace)
+                for (const r of kept) list.remove(r.widget);
+            for (const r of inPlace ? next.slice(kept.length) : next)
+                list.add(r.widget);
+            rows = next;
+            empty.set_visible(!rows.length);
+            refresh();
+        };
+        const add = this._inventoryAddGroup(inventory);
+        page.add(add.group);
+
+        const handlers = [];
+        let timerId = 0;
+        const follow = () => {
+            if (handlers.length) return false;
+            handlers.push(settings.connect('changed::inventory-destinations',
+                () => rebuild()));
+            handlers.push(settings.connect('changed::instances',
+                () => add.reload()));
+            return true;
+        };
+        follow();
+        rebuild();
+        page.connect('map', () => {
+            if (follow()) {
+                rebuild();
+                add.reload();
+            } else {
+                refresh();
+            }
+            if (!timerId) {
+                timerId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT,
+                    POLL_S, () => {
+                        refresh();
+                        return GLib.SOURCE_CONTINUE;
+                    });
+            }
+        });
+        page.connect('unmap', () => {
+            for (const id of handlers.splice(0)) settings.disconnect(id);
+            if (timerId) GLib.source_remove(timerId);
+            timerId = 0;
+        });
+        return page;
+    }
+
+    /**
+     * The row of destination `dest`: its status, the enrollment method
+     * and its fields, and the Enroll, Unenroll and Remove buttons. The
+     * pairing code, the key and the password are emptied once their call
+     * is over, whatever its outcome. A result goes to the row's message
+     * line; once the page has called `detach` (the row left the list, as
+     * on a removal), it goes to `tell(label, text)` instead. Returns
+     * `{widget, refresh, detach}`.
+     */
+    _inventoryRow(inventory, dest, tell) {
+        const row = new Adw.ExpanderRow({title: dest.label,
+            subtitle: `${dest.url} · ${dest.db}`, use_markup: false});
+        const status = new Adw.ActionRow({title: _('Not enrolled'),
+            use_markup: false});
+        row.add_row(status);
+
+        const methods = new Gtk.StringList();
+        for (const label of [_('Pairing code'), _('API key'),
+            _('Login and password')])
+            methods.append(label);
+        const method = new Adw.ComboRow({
+            title: _('Enrollment method'),
+            subtitle: _('Odoo gives a pairing code under Stream Deck › My '
+                + 'workstations › Add a workstation.'),
+            model: methods, use_markup: false,
+        });
+        row.add_row(method);
+        const code = new Adw.EntryRow({title: _('Pairing code'),
+            use_markup: false});
+        const key = new Adw.PasswordEntryRow({title: _('API key'),
+            use_markup: false});
+        const login = new Adw.EntryRow({title: _('Login'),
+            use_markup: false});
+        const password = new Adw.PasswordEntryRow({title: _('Password'),
+            use_markup: false});
+        const fields = [[code], [key], [login, password]];
+        for (const w of fields.flat()) row.add_row(w);
+        const showMethod = () => {
+            const chosen = method.get_selected();
+            fields.forEach((ws, i) => ws.forEach(w => w.set_visible(
+                i === chosen)));
+        };
+        method.connect('notify::selected', showMethod);
+        showMethod();
+
+        const message = new Adw.ActionRow({title: '', use_markup: false,
+            visible: false});
+        let attached = true;
+        const say = text => {
+            if (attached) {
+                message.set_title(text);
+                message.set_visible(text !== '');
+            } else if (text !== '') {
+                tell(dest.label, text);
+            }
+        };
+        const enroll = new Gtk.Button({label: _('Enroll'),
+            valign: Gtk.Align.CENTER, css_classes: ['suggested-action']});
+        const unenroll = new Gtk.Button({label: _('Unenroll'),
+            valign: Gtk.Align.CENTER});
+        const remove = new Gtk.Button({label: _('Remove'),
+            valign: Gtk.Align.CENTER, css_classes: ['destructive-action']});
+        const actions = new Adw.ActionRow({title: _('Enrollment'),
+            use_markup: false});
+        for (const b of [enroll, unenroll, remove]) actions.add_suffix(b);
+        row.add_row(actions);
+        row.add_row(message);
+
+        const refresh = () => {
+            inventory.status(dest.id).then(st => {
+                if (!st) return;
+                const t = statusText(st);
+                status.set_title(t.title);
+                status.set_subtitle(t.subtitle);
+            }).catch(e => console.log(`[ERPLibreHome:prefs] ${e.message}`));
+        };
+        // Runs `call()` with the buttons insensitive, then shows what
+        // `said(result)` returns and the status read again.
+        const run = async (call, said) => {
+            const buttons = [enroll, unenroll, remove];
+            for (const b of buttons) b.set_sensitive(false);
+            say('');
+            try {
+                say(said(await call()));
+            } finally {
+                for (const b of buttons) b.set_sensitive(true);
+                refresh();
+            }
+        };
+
+        enroll.connect('clicked', () => {
+            run(() => inventory.enroll(dest.id, {
+                method: ENROLL_METHODS[method.get_selected()],
+                code: code.get_text(), key: key.get_text(),
+                login: login.get_text(), password: password.get_text(),
+            }).finally(() => {
+                for (const w of [code, key, password]) w.set_text('');
+            }), r => (r.ok
+                ? _('Enrolled: the extension reports within a few seconds.')
+                : messageFor(r.error)));
+        });
+        const unenrolled = r => {
+            if (!r.ok) return messageFor(r.error);
+            if (r.revoked) return _('Unenrolled: Odoo revoked the token.');
+            if (r.error) {
+                return `${_('The token is forgotten here, but Odoo did not '
+                    + 'confirm: revoke this workstation in Odoo.')} ${
+                    messageFor(r.error)}`;
+            }
+            return _('Not enrolled: there was no token to revoke.');
+        };
+        unenroll.connect('clicked', () => {
+            run(() => inventory.unenroll(dest.id), unenrolled);
+        });
+        // The destination is gone even when the keyring failed: its token
+        // may then stay there, out of reach of any Unenroll button.
+        const removed = r => {
+            if (!r.removed) return messageFor(r.error);
+            const said = [_('Destination removed.')];
+            if (r.ok) {
+                said.push(unenrolled(r));
+            } else {
+                said.push(messageFor(r.error),
+                    _('Its token may remain there: delete it from the '
+                        + 'keyring.'));
+                if (!r.revoked) {
+                    said.push(_('If this workstation was enrolled there, '
+                        + 'revoke it in Odoo.'));
+                }
+            }
+            return said.join(' ');
+        };
+        // A first click asks for a second one within 5 s.
+        let confirmId = 0;
+        remove.connect('clicked', () => {
+            if (!confirmId) {
+                remove.set_label(_('Confirm removal'));
+                confirmId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT,
+                    5, () => {
+                        confirmId = 0;
+                        remove.set_label(_('Remove'));
+                        return GLib.SOURCE_REMOVE;
+                    });
+                return;
+            }
+            GLib.source_remove(confirmId);
+            confirmId = 0;
+            remove.set_label(_('Remove'));
+            run(() => inventory.remove(dest.id), removed);
+        });
+        const detach = () => {
+            attached = false;
+        };
+        return {widget: row, refresh, detach};
+    }
+
+    /**
+     * The form that adds a destination: an instance of the `instances`
+     * key or any Odoo by its URL, the database and an optional name; a
+     * refusal is explained under the form. Returns `{group, reload}`,
+     * `reload` listing the instances again.
+     */
+    _inventoryAddGroup(inventory) {
+        const group = new Adw.PreferencesGroup({
+            title: _('Add a destination'),
+            description: _('Plain HTTP is accepted only to this machine (a '
+                + 'local instance, an SSH tunnel); use https anywhere else.'),
+        });
+        const source = new Adw.ComboRow({title: _('Odoo instance'),
+            use_markup: false});
+        const url = new Adw.EntryRow({title: _('URL (https://…)'),
+            use_markup: false});
+        const db = new Adw.EntryRow({title: _('Database'), use_markup: false});
+        const label = new Adw.EntryRow({title: _('Name (optional)'),
+            use_markup: false});
+        const message = new Adw.ActionRow({title: '', use_markup: false,
+            visible: false});
+        const addButton = new Gtk.Button({label: _('Add'),
+            valign: Gtk.Align.CENTER, css_classes: ['suggested-action']});
+        const addRow = new Adw.ActionRow({title: _('Add this destination'),
+            use_markup: false});
+        addRow.add_suffix(addButton);
+        for (const w of [source, url, db, label, addRow, message])
+            group.add(w);
+
+        let instances = [];
+        let filled = false;
+        const chosen = () => {
+            const i = source.get_selected();
+            return i > 0 ? instances[i - 1] ?? null : null;
+        };
+        const onSource = () => {
+            const instance = chosen();
+            if (instance) {
+                url.set_text(instance.url);
+                filled = true;
+            } else if (filled) {
+                url.set_text('');
+                filled = false;
+            }
+            url.set_sensitive(!instance);
+        };
+        const reload = () => {
+            instances = inventory.instances();
+            const model = new Gtk.StringList();
+            model.append(_('Other, by URL'));
+            for (const i of instances) model.append(i.name);
+            source.set_model(model);
+            source.set_selected(0);
+            onSource();
+        };
+        source.connect('notify::selected', onSource);
+        reload();
+
+        addButton.connect('clicked', () => {
+            const r = inventory.add({instanceId: chosen()?.id ?? null,
+                url: url.get_text(), db: db.get_text(),
+                label: label.get_text()});
+            if (!r.ok) {
+                message.set_title(messageFor(r.reason));
+                message.set_visible(true);
+                return;
+            }
+            message.set_visible(false);
+            for (const w of [db, label]) w.set_text('');
+            source.set_selected(0);
+            url.set_text('');
+            filled = false;
+        });
+        return {group, reload};
     }
 
     _buildNetworkPage(settings) {

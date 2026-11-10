@@ -8,6 +8,18 @@ migrations that are not auto-applied.
 ## [Unreleased]
 
 ### Added
+- Odoo inventory: the extension reports the Stream Decks of the
+  workstation, its deck service and its versions to the Odoo instances
+  that have the ERPLibre module `erplibre_streamdeck`, through
+  `/streamdeck/v1/enroll`, `report` and `unenroll` (protocol 1.0). A
+  background service watches the decks (GUdev, else an asynchronous
+  `lsusb` poll every 10 s), reports at each change and every 15 minutes,
+  and keeps the events of an Odoo that is down in a queue per destination
+  (1000 events or 30 days). The preferences page « Odoo inventory » adds
+  destinations (an ERPLibre instance or any Odoo by URL), enrolls them by
+  pairing code, API key or login and password, shows their status and
+  unenrolls them. The token stays in the GNOME keyring; HTTPS is required
+  except to this machine.
 - `npm test` can send each test's verdict to the requirement registry of
   an Odoo instance (module `erplibre_devops_requirement`), when the four
   `ERPLIBRE_REQUIREMENT_*` variables are set: references
@@ -17,6 +29,13 @@ migrations that are not auto-applied.
   the same two commands, unchanged without the variables.
 
 ### Changed
+- `CONTRACT.md` 1.2 states the Odoo inventory: its routes, bodies, error
+  codes, bounds, the keyring schema and the state file; the extension
+  relies on the Odoo module's routes, on `streamdeck.conf` and on the
+  state of the deck unit.
+- The device indicator reads the decks from the inventory service instead
+  of running `lsusb` itself, and its menu shows one inventory line: up to
+  date, offline with the events waiting, refused, or enrollment revoked.
 - The extension lives in its own repository,
   `TechnoLibre/erplibre-home-gnome-extension`, with the history of its
   files. ERPLibre clones it at `script/gnome-extension/erplibre_home/`,

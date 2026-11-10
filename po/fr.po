@@ -156,6 +156,18 @@ msgstr "(aucun Stream Deck détecté)"
 msgid "🔄 Re-scan USB"
 msgstr "🔄 Re-scan USB"
 
+msgid "Inventory: up to date"
+msgstr "Inventaire : à jour"
+
+msgid "Inventory: offline ({n} pending)"
+msgstr "Inventaire : hors ligne ({n} en attente)"
+
+msgid "Inventory: refused"
+msgstr "Inventaire : refusé"
+
+msgid "Inventory: enrollment revoked"
+msgstr "Inventaire : inscription révoquée"
+
 msgid "Status"
 msgstr "Statut"
 
@@ -944,3 +956,195 @@ msgstr "aujourd'hui"
 
 msgid "yesterday"
 msgstr "hier"
+
+msgid "ERPLibre Home inventory: {label}"
+msgstr "Inventaire ERPLibre Home : {label}"
+
+msgid "Not a valid address: give an http or https URL, without a query or a fragment."
+msgstr "Adresse invalide : donnez une URL http ou https, sans requête ni fragment."
+
+msgid "Only http and https addresses are accepted."
+msgstr "Seules les adresses http et https sont acceptées."
+
+msgid "Remove the user name and password from the address: the settings would keep them."
+msgstr "Retirez l'utilisateur et le mot de passe de l'adresse : les réglages les garderaient."
+
+msgid "Plain HTTP is accepted only to this machine: use https."
+msgstr "Le HTTP simple n'est accepté que vers cette machine : utilisez https."
+
+msgid "Not a database name Odoo accepts."
+msgstr "Odoo n'accepte pas ce nom de base de données."
+
+msgid "This Odoo and database already are a destination."
+msgstr "Cet Odoo et cette base sont déjà une destination."
+
+msgid "This destination or instance no longer exists."
+msgstr "Cette destination ou cette instance n'existe plus."
+
+msgid "Fill in every field of the chosen method."
+msgstr "Remplissez chaque champ de la méthode choisie."
+
+msgid "A pairing code has 8 letters and digits."
+msgstr "Un code d'appairage compte 8 lettres et chiffres."
+
+msgid "A value is longer than Odoo accepts."
+msgstr "Une valeur dépasse la longueur qu'Odoo accepte."
+
+msgid "Odoo refused the request as malformed."
+msgstr "Odoo a refusé la requête comme mal formée."
+
+msgid "This Odoo speaks another version of the inventory protocol: update the extension or the Odoo module."
+msgstr "Cet Odoo parle une autre version du protocole d'inventaire : mettez à jour l'extension ou le module Odoo."
+
+msgid "Odoo refused these credentials: wrong, expired or already used."
+msgstr "Odoo a refusé ces identifiants : erronés, expirés ou déjà utilisés."
+
+msgid "This Odoo user is archived or may not use Stream Deck."
+msgstr "Cet utilisateur Odoo est archivé ou n'a pas accès à Stream Deck."
+
+msgid "Odoo no longer accepts the enrollment of this workstation."
+msgstr "Odoo n'accepte plus l'inscription de ce poste."
+
+msgid "Odoo did not answer."
+msgstr "Odoo n'a pas répondu."
+
+msgid "Odoo has no inventory route here: check the database and that the Stream Deck module is installed."
+msgstr "Odoo n'a pas de route d'inventaire ici : vérifiez la base de données et que le module Stream Deck est installé."
+
+msgid "Odoo gave an unexpected answer."
+msgstr "Odoo a donné une réponse inattendue."
+
+msgid "The GNOME keyring could not be used."
+msgstr "Le trousseau GNOME n'a pas pu être utilisé."
+
+msgid "This machine has no readable /etc/machine-id."
+msgstr "Cette machine n'a pas de /etc/machine-id lisible."
+
+msgid "A call to this Odoo is already in progress."
+msgstr "Un appel à cet Odoo est déjà en cours."
+
+msgid "Error: {code}"
+msgstr "Erreur : {code}"
+
+msgid "Last report: {time}"
+msgstr "Dernière remontée : {time}"
+
+msgid "Enrolled, waiting for the first report"
+msgstr "Inscrit, en attente de la première remontée"
+
+msgid "The extension reports within a few seconds."
+msgstr "L'extension fait sa remontée d'ici quelques secondes."
+
+msgid "Up to date"
+msgstr "À jour"
+
+msgid "Offline ({n} pending)"
+msgstr "Hors ligne ({n} en attente)"
+
+msgid "Enrollment revoked"
+msgstr "Inscription révoquée"
+
+msgid "Enroll again to resume the reports."
+msgstr "Inscrivez le poste de nouveau pour reprendre les remontées."
+
+msgid "Refused"
+msgstr "Refusé"
+
+msgid "Not enrolled"
+msgstr "Non inscrit"
+
+msgid "Enroll with a pairing code, an API key, or a login and password."
+msgstr "Inscrivez le poste par un code d'appairage, une clé d'API, ou un identifiant et un mot de passe."
+
+msgid "Odoo inventory"
+msgstr "Inventaire Odoo"
+
+msgid "This workstation reports its Stream Decks and its deck service to each Odoo below, which needs the Stream Deck module. The token Odoo returns stays in the GNOME keyring; a key or a password typed here is sent once and never kept."
+msgstr "Ce poste remonte ses Stream Deck et son service deck à chaque Odoo ci-dessous, qui doit avoir le module Stream Deck. Le jeton que rend Odoo reste dans le trousseau GNOME ; une clé ou un mot de passe tapé ici n'est envoyé qu'une fois et n'est jamais gardé."
+
+msgid "Destinations"
+msgstr "Destinations"
+
+msgid "No destination yet: add one below."
+msgstr "Aucune destination : ajoutez-en une ci-dessous."
+
+msgid "Pairing code"
+msgstr "Code d'appairage"
+
+msgid "API key"
+msgstr "Clé d'API"
+
+msgid "Login and password"
+msgstr "Identifiant et mot de passe"
+
+msgid "Enrollment method"
+msgstr "Méthode d'inscription"
+
+msgid "Odoo gives a pairing code under Stream Deck › My workstations › Add a workstation."
+msgstr "Odoo donne un code d'appairage sous Stream Deck › Mes postes › Ajouter un poste."
+
+msgid "Login"
+msgstr "Identifiant"
+
+msgid "Password"
+msgstr "Mot de passe"
+
+msgid "Enroll"
+msgstr "Inscrire"
+
+msgid "Unenroll"
+msgstr "Désinscrire"
+
+msgid "Remove"
+msgstr "Retirer"
+
+msgid "Enrollment"
+msgstr "Inscription"
+
+msgid "Enrolled: the extension reports within a few seconds."
+msgstr "Inscrit : l'extension fait sa remontée d'ici quelques secondes."
+
+msgid "Unenrolled: Odoo revoked the token."
+msgstr "Désinscrit : Odoo a révoqué le jeton."
+
+msgid "The token is forgotten here, but Odoo did not confirm: revoke this workstation in Odoo."
+msgstr "Le jeton est oublié ici, mais Odoo n'a pas confirmé : révoquez ce poste dans Odoo."
+
+msgid "Not enrolled: there was no token to revoke."
+msgstr "Non inscrit : il n'y avait aucun jeton à révoquer."
+
+msgid "Destination removed."
+msgstr "Destination supprimée."
+
+msgid "Its token may remain there: delete it from the keyring."
+msgstr "Son jeton peut y être resté : supprimez-le du trousseau."
+
+msgid "If this workstation was enrolled there, revoke it in Odoo."
+msgstr "Si ce poste y était inscrit, révoquez-le dans Odoo."
+
+msgid "Confirm removal"
+msgstr "Confirmer le retrait"
+
+msgid "Add a destination"
+msgstr "Ajouter une destination"
+
+msgid "Plain HTTP is accepted only to this machine (a local instance, an SSH tunnel); use https anywhere else."
+msgstr "Le HTTP simple n'est accepté que vers cette machine (une instance locale, un tunnel SSH) ; utilisez https partout ailleurs."
+
+msgid "Odoo instance"
+msgstr "Instance Odoo"
+
+msgid "Database"
+msgstr "Base de données"
+
+msgid "Name (optional)"
+msgstr "Nom (facultatif)"
+
+msgid "Add"
+msgstr "Ajouter"
+
+msgid "Add this destination"
+msgstr "Ajouter cette destination"
+
+msgid "Other, by URL"
+msgstr "Autre, par URL"

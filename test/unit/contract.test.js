@@ -16,6 +16,11 @@ import {DECK_UNIT, CONTROLLER_REL, DECK_ENTRY_REL, deckLockPath}
 import {projectRootFrom, STREAMDECK_PYTHON_REL, GALLERY_SERVER_REL}
     from '../../lib/project-root.js';
 import {GALLERY_ACTION_HEADER} from '../../lib/gallery-launch.js';
+import {INVENTORY_PROTOCOL, HEARTBEAT_S, TIMEOUT_S, POLL_S, QUEUE_MAX,
+    QUEUE_MAX_AGE_DAYS, ENROLL_PATH, REPORT_PATH, UNENROLL_PATH,
+    ENROLL_METHODS, ERROR_CODES, buildState, diffDecks,
+    workstationFingerprint} from '../../lib/inventory.js';
+import {createHmac} from 'node:crypto';
 
 const ROOT = new URL('../../', import.meta.url);
 
@@ -285,3 +290,166 @@ test('the controller menu reaches the gallery the contract states', () => {
         "get_request_headers().append(GALLERY_ACTION_HEADER, '1')"));
     assert.ok(FLAT.includes(`\`${GALLERY_ACTION_HEADER}: 1\``));
 });
+
+// The Odoo inventory: the extension's side of the wire protocol that the
+// Odoo module erplibre_streamdeck serves. The constants are read from
+// lib/inventory.js; the GJS modules (keyring, state file) are read as text,
+// since importing them needs the fakes of gjs-fake.js.
+
+test('the contract is at 1.2 since the extension reports to Odoo', () => {
+    assert.ok(CONTRACT.includes('**Contract version: 1.2**'));
+    assert.match(section('Versioning'), /^- \*\*1\.2:\*\* /m);
+    const service = text('lib/inventory-service.js');
+    assert.ok(service.includes("export const CONTRACT_VERSION = '1.2';"));
+});
+
+test('the extension relies on the Odoo routes of the inventory section', () => {
+    const relies = section('What the extension relies on').replace(/\s+/g, ' ');
+    assert.ok(relies.includes('`erplibre_streamdeck`'));
+    for (const route of [ENROLL_PATH, REPORT_PATH, UNENROLL_PATH])
+        assert.ok(relies.includes(`\`${route}\``), route);
+    assert.ok(relies.includes('[Odoo inventory](#odoo-inventory)'));
+    // What the reports read of the Stream Deck level.
+    assert.ok(relies.includes('`$XDG_CONFIG_HOME/erplibre-home/streamdeck.conf`'));
+    assert.ok(relies.includes('`DECK_PROGRAM=`'));
+    assert.ok(relies.includes('`systemctl --user show`'));
+});
+
+test('the inventory section states the protocol, routes, codes and bounds',
+    () => {
+        const inv = section('Odoo inventory').replace(/\s+/g, ' ');
+        assert.ok(inv.includes(`\`"protocol": "${INVENTORY_PROTOCOL}"\``));
+        for (const route of [ENROLL_PATH, REPORT_PATH, UNENROLL_PATH])
+            assert.ok(inv.includes(`\`POST ${route}\``), route);
+        for (const code of ERROR_CODES)
+            assert.ok(inv.includes(`\`${code}\``), code);
+        for (const method of ENROLL_METHODS)
+            assert.ok(inv.includes(`\`${method}\``), method);
+        assert.ok(inv.includes(`every ${HEARTBEAT_S} s`));
+        assert.ok(inv.includes(`after ${TIMEOUT_S} s`));
+        assert.ok(inv.includes(`${QUEUE_MAX} events or ${QUEUE_MAX_AGE_DAYS} days`));
+        assert.ok(inv.includes('`GET <url>/web/login?db=<db>`'));
+        assert.ok(inv.includes('`Authorization: Bearer <token>`'));
+    });
+
+test('the inventory section names every key of the state and the events',
+    () => {
+        const inv = section('Odoo inventory');
+        const state = buildState({serviceState: 'active',
+            decks: [{usb_path: '1-2'}]});
+        const [event] = diffDecks([], [{serial: 'SN-INVENTED'}], 'now',
+            () => 'u1');
+        for (const key of [...Object.keys(state), ...Object.keys(state.os),
+            ...Object.keys(state.decks[0]), ...Object.keys(event),
+            'events', 'lost_events', 'accepted', 'heartbeat_s',
+            'workstation_id', 'token', 'fingerprint', 'hostname', 'error'])
+            assert.ok(inv.includes(`\`${key}\``), key);
+    });
+
+test('the inventory section states where the workstation keeps its part',
+    () => {
+        const inv = section('Odoo inventory').replace(/\s+/g, ' ');
+        const secret = text('lib/secret-store.js');
+        const schema = secret.match(/^export const SECRET_SCHEMA = '([^']+)';$/m)[1];
+        assert.ok(inv.includes(`\`${schema}\``), schema);
+        for (const attribute of ['destination', 'url', 'db'])
+            assert.ok(inv.includes(`\`${attribute}\``), attribute);
+        const service = text('lib/inventory-service.js');
+        assert.ok(service.includes(
+            '/erplibre-home/inventory/${destId}.json`;'));
+        assert.ok(inv.includes(
+            '`$XDG_STATE_HOME/erplibre-home/inventory/<id>.json`'));
+        assert.ok(service.includes(
+            '/erplibre-home/inventory-seen.json`;'));
+        assert.ok(inv.includes(
+            '`$XDG_STATE_HOME/erplibre-home/inventory-seen.json`'));
+        assert.ok(inv.includes('compares the decks and the deck service '
+            + 'with those it last saw, and reports a difference as events '
+            + 'dated at that start'));
+        assert.ok(inv.includes('A destination whose token leaves the '
+            + 'keyring queues nothing more; still without one '
+            + `${POLL_S} s later, it drops the events it held, which never `
+            + 'reach a later enrollment'));
+        assert.ok(inv.includes('`inventory-destinations`'));
+        assert.ok(text('schemas/org.gnome.shell.extensions.erplibre-home'
+            + '.gschema.xml').includes('<key name="inventory-destinations"'));
+    });
+
+// The "- `start`…" item of section `title`, white space folded: the
+// statements below are checked where they belong, not anywhere in the
+// section, since several routes share a code or a key.
+function item(title, start) {
+    const found = section(title).split(/\n(?=- |\n)/)
+        .filter((b) => b.startsWith(`- ${start}`));
+    assert.equal(found.length, 1, `item ${start}: ${found.length}`);
+    return found[0].replace(/\s+/g, ' ');
+}
+
+// What Odoo's routes do with each name, as the wire contract fixes it: a
+// changed sentence here is a protocol change, made on both sides at once.
+const WIRE_FACTS = [
+    [`\`POST ${ENROLL_PATH}\``, [
+        'body `protocol`, `method`, `fingerprint`, `hostname`',
+        '`code` for `pairing_code`', '`key` for `api_key`',
+        '`login` and `password` for `password`',
+        'Reply 200: `workstation_id`, `token`',
+        '400 `bad_request` or `protocol_unsupported`',
+        '401 `credentials_refused` (wrong, expired or used)',
+        '403 `user_inactive`',
+        'The same user and fingerprint enrolling again keep their '
+            + 'workstation, whose token is replaced']],
+    [`\`POST ${REPORT_PATH}\``, [
+        'header `Authorization: Bearer <token>`',
+        'body `protocol`, `state`, `events`, `lost_events`',
+        'Reply 200: `accepted`, the uuids of the events stored or already '
+            + 'known, and `heartbeat_s`',
+        '401 `token_invalid` (unknown or revoked token)',
+        '403 `user_inactive`', '400 `bad_request` or `protocol_unsupported`']],
+    [`\`POST ${UNENROLL_PATH}\``, [
+        'the same header, body `protocol`',
+        'reply 200 once the token is revoked']],
+    ['`state`', ['`usb_product_id` (4 lowercase hex digits)',
+        'A deck of the workstation that `decks` does not list becomes '
+            + 'disconnected',
+        'Every text holds at most 256 characters, counted by code point, '
+            + 'and no NUL character',
+        'A deck with neither a `serial` nor a `usb_path` cannot be named '
+            + 'and is left out of `decks` and of the events']],
+    ['`events`', ['`at` (ISO 8601 in UTC, when the extension saw it)',
+        'Odoo keeps one event per uuid']],
+    ['`lost_events`', ['the running total of events the destination\'s '
+        + 'queue dropped unsent', 'Odoo keeps the largest total it received']],
+    ['`fingerprint`', ['the HMAC-SHA256, keyed by `<uid>|<url>|<db>` (the '
+        + 'URL without its trailing slashes), of the stripped content of '
+        + '`/etc/machine-id`, in 64 lowercase hex characters']],
+    ['`token`', ['base64url of 32 random bytes, 43 characters; Odoo keeps '
+        + 'only its SHA-256']],
+];
+
+test('the inventory section states what the wire contract fixes, where it '
+    + 'applies', () => {
+    for (const [start, facts] of WIRE_FACTS) {
+        const text = item('Odoo inventory', start);
+        for (const fact of facts)
+            assert.ok(text.includes(fact), `${start}: ${fact}`);
+    }
+    const inv = section('Odoo inventory').replace(/\s+/g, ' ');
+    assert.ok(inv.includes('Odoo answers an unknown MAJOR with 400 '
+        + '`protocol_unsupported`, accepts a newer MINOR and ignores the '
+        + 'keys it does not know'));
+});
+
+test('the fingerprint and the token are what the inventory section says',
+    () => {
+        const text = item('Odoo inventory', '`fingerprint`');
+        const template = text.match(/keyed by `([^`]+)`/)[1];
+        const key = template.replace('<uid>', '1000')
+            .replace('<url>', 'https://odoo.example.invalid')
+            .replace('<db>', 'base');
+        const hmac = (k, m) => createHmac('sha256', k).update(m)
+            .digest('hex');
+        assert.equal(workstationFingerprint({machineId: ' 0123abcd\n',
+            uid: 1000, url: 'https://odoo.example.invalid//', db: 'base'},
+        hmac), hmac(key, '0123abcd'));
+        assert.equal(Buffer.alloc(32).toString('base64url').length, 43);
+    });

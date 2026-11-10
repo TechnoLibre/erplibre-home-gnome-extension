@@ -12,6 +12,7 @@ import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
+import * as Config from 'resource:///org/gnome/shell/misc/config.js';
 
 import {IndicatorRegistry} from './lib/registry.js';
 import {runMigrationGjs} from './lib/settings.js';
@@ -21,6 +22,7 @@ import {Debouncer, gitPull, gitCommitPush, SYNC_FILE, syncImportPath} from './li
 import {setGettext} from './lib/i18n.js';
 import {resolveLinks, makeGioReadLink} from './lib/project-root.js';
 import {ClaudeStateWatcher} from './lib/claude-state.js';
+import {InventoryService} from './lib/inventory-service.js';
 import {listMpvEntriesSync, sendMpvCommand} from './lib/mpv-state.js';
 import {runSchemaMigrations} from './lib/migrations.js';
 import {windowMaximizeFlags, unmaximizeWindow, maximizeWindow, defaultSeat}
@@ -176,6 +178,7 @@ export default class ERPLibreHomeExtension extends Extension {
     #settings = null;
     #signalIds = [];
     #claudeState = null;
+    #inventory = null;
 
     enable() {
         this.#dbus = Gio.DBusExportedObject.wrapJSObject(IFACE_XML, this);
@@ -221,6 +224,20 @@ export default class ERPLibreHomeExtension extends Extension {
             this._notifySeen = new Map(); // sid -> last notif ts (ms)
             this.#claudeState.subscribe(idx =>
                 this._maybeNotifyAwaiting(idx));
+        }
+
+        // Before the indicators: the device indicator reads its decks.
+        try {
+            this.#inventory = new InventoryService({
+                settings: this.#settings,
+                extensionVersion: String(this.metadata?.version ?? ''),
+                stateDir: GLib.get_user_state_dir(),
+                shellVersion: Config.PACKAGE_VERSION ?? null,
+                extensionPath: this.path,
+            });
+            this.#inventory.start();
+        } catch (e) {
+            console.log(`[ERPLibreHome] inventory: ${e.message}`);
         }
 
         this.#registry = new IndicatorRegistry();
@@ -306,6 +323,8 @@ export default class ERPLibreHomeExtension extends Extension {
         this._virtualKeyboard = null;
         try { this.#claudeState?.stop(); } catch (_e) {}
         this.#claudeState = null;
+        try { this.#inventory?.stop(); } catch (_e) {}
+        this.#inventory = null;
         this.#registry = null;
         this.#settings = null;
         console.log('[ERPLibreHome] disabled');
@@ -347,6 +366,7 @@ export default class ERPLibreHomeExtension extends Extension {
                 extension: this,
                 iconName: overrides[id] || undefined,
                 claudeState: this.#claudeState,
+                inventory: this.#inventory,
             });
             const role = `${this.uuid}-${id}`;
             const box = this.#settings.get_string('panel-box') || 'left';
