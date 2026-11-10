@@ -1,12 +1,14 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
+import {readFileSync, realpathSync, statSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
 import {DECK_UNIT, CONTROLLER_REL, DECK_ENTRY_REL, DECK_READ_AT_MS,
     deckUnitPath, deckLockPath, openDeckArgv, restartDeckArgv, deckStateArgv,
     deckRunning, deckCheckArgv, deckStartFailure, parseUnitShow,
     deckStartOutcome, deckStartSettled, awaitDeckStart, parseLockHolder,
     deckStartNotice}
     from '../../lib/deck-service.js';
+import {projectRootFrom} from '../../lib/project-root.js';
 
 const ROOT = '/opt/mon depot';
 const PYTHON = `${ROOT}/.venv.streamdeck/bin/python`;
@@ -64,6 +66,19 @@ test('the state is read in a short bounded series after the start', () => {
     for (let i = 1; i < at.length; i++)
         assert.ok(at[i] > at[i - 1] && at[i] - at[i - 1] <= 3000, String(at));
     assert.ok(at[at.length - 1] <= 10000, String(at));
+});
+
+test('the state is read 1.5, 3, 5 and 8 s after the start', async () => {
+    // A program still running is read at every time of the series: the
+    // waits, summed one after the other, give the read times.
+    const waits = [];
+    await awaitDeckStart({
+        wait: async ms => { waits.push(ms); },
+        readProps: async () => SHOWN.running,
+    });
+    let elapsed = 0;
+    assert.deepEqual(waits.map(ms => (elapsed += ms)),
+        [1500, 3000, 5000, 8000]);
 });
 
 // Runs awaitDeckStart on `states` read in turn; returns the outcome, the
@@ -250,6 +265,20 @@ test('active, activating and reloading count as running', () => {
         assert.equal(deckRunning(state), true, state);
     for (const state of ['inactive', 'failed', 'deactivating', '', null])
         assert.equal(deckRunning(state), false, String(state));
+});
+
+// The ERPLibre checkout that holds this clone, found as the extension
+// finds it; '' when the clone stands alone, outside any checkout.
+const EXTENSION_DIR = realpathSync(
+    fileURLToPath(new URL('../../', import.meta.url))).replace(/\/+$/, '');
+const CHECKOUT = projectRootFrom(EXTENSION_DIR, null);
+const IN_CHECKOUT = CHECKOUT !== EXTENSION_DIR;
+
+test('the controller path is relative to the checkout root', {
+    skip: IN_CHECKOUT ? false : 'not inside an ERPLibre checkout',
+}, () => {
+    assert.equal(CONTROLLER_REL, 'script/stream_deck/erplibre_controller.py');
+    assert.ok(statSync(`${CHECKOUT}/${CONTROLLER_REL}`).isFile());
 });
 
 test('the check runs the entry point of the checkout with --check', () => {
