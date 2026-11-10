@@ -286,9 +286,17 @@ class Registry:
         A path is replaced only whole: `/repo` touches neither `/repo2` nor
         `/x/repo`. A `file://` URL of such a path, as in a node stack,
         becomes the same relative path rather than a URL without its root.
-        The root goes before the home directory, which usually holds it."""
+        The root goes before the home directory, which usually holds it.
+
+        Every `file://` token is percent-decoded first, so the paths are
+        matched in one form whatever set of characters the writer encoded:
+        node's pathToFileURL keeps « + @ ( » and encodes « ~ », Python's
+        quote does the reverse. The key is replaced after the decoding."""
         if not log:
             return log
+        log = re.sub(
+            r"file://\S+", lambda m: urllib.parse.unquote(m.group()), log
+        )
         if self.key:
             log = log.replace(self.key, "***")
         for path, below, alone in (
@@ -298,8 +306,7 @@ class Registry:
             path = str(path).rstrip(os.sep)
             if not path:
                 continue
-            url = "file://" + urllib.parse.quote(path)
-            path = rf"(?<![\w.-])(?:{re.escape(url)}|{re.escape(path)})"
+            path = rf"(?<![\w.-])(?:file://)?{re.escape(path)}"
             log = re.sub(path + re.escape(os.sep), below, log)
             log = re.sub(path + r"(?![\w.-])", alone, log)
         return log

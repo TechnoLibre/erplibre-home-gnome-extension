@@ -430,6 +430,96 @@ class TestPush(unittest.TestCase):
             "at t (test/unit/a.test.js:23:56)\nat u (~/lib/x.js:1:2)",
         )
 
+    # Invented roots: a space, which every file URL encodes, next to a
+    # character that node's pathToFileURL keeps as is and Python's quote
+    # encodes (« + », « @ », « ( »), or the reverse (« ~ »).
+    ODD_ROOTS = (
+        "/srv/invented base+one/repo",
+        "/srv/invented@two base/repo",
+        "/srv/invented (three)/repo",
+        "/srv/~invented four/repo",
+    )
+
+    @staticmethod
+    def _node_urls(paths):
+        """The file URL node's own pathToFileURL gives each of `paths`."""
+        script = (
+            "const {pathToFileURL} = require('node:url');"
+            "for (const p of JSON.parse(process.argv[1]))"
+            " console.log(pathToFileURL(p).href);"
+        )
+        done = subprocess.run(
+            ["node", "-e", script, json.dumps(list(paths))],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return done.stdout.splitlines()
+
+    def test_a_node_file_url_of_an_odd_root_leaves_no_root(self):
+        registry = rr.Registry("https://registry.invalid/", "r", "u", KEY)
+        for root in self.ODD_ROOTS:
+            home = os.path.dirname(root)
+            url_root, url_home = self._node_urls([root, home + "/lib/x.js"])
+            with self.subTest(root=root), mock.patch.dict(
+                os.environ, {"HOME": home}
+            ):
+                log = registry._neutralize(
+                    f"at t ({url_root}/test/unit/a.test.js:23:56)\n"
+                    f"at u ({url_home}:1:2)\n"
+                    f"in {url_root}",
+                    Path(root),
+                )
+                self.assertEqual(
+                    log,
+                    "at t (test/unit/a.test.js:23:56)\n"
+                    "at u (~/lib/x.js:1:2)\n"
+                    "in .",
+                )
+
+    def test_every_encoding_of_an_odd_root_is_made_relative(self):
+        registry = rr.Registry("https://registry.invalid/", "r", "u", KEY)
+        for root in self.ODD_ROOTS:
+            forms = (
+                root,
+                "file://" + rr.urllib.parse.quote(root),
+                "file://" + rr.urllib.parse.quote(root, safe="/@+()~"),
+            )
+            for form in forms:
+                with self.subTest(form=form), mock.patch.dict(
+                    os.environ, {"HOME": "/nonexistent-home"}
+                ):
+                    log = registry._neutralize(
+                        f"at t ({form}/test/unit/a.test.js:1:2)", Path(root)
+                    )
+                    self.assertEqual(log, "at t (test/unit/a.test.js:1:2)")
+
+    def test_the_sent_log_of_an_odd_root_names_none_of_it(self):
+        for root in self.ODD_ROOTS:
+            js = Path(root) / "test/unit/a.test.js"
+            (url,) = self._node_urls([str(js)])
+            fake = FakeRegistry([(rr.NODE_KIND, TestPush.REF_JS)])
+            registry = rr.Registry(
+                "https://registry.invalid/", "registry", "runner", KEY
+            )
+            note = _note(
+                rr.NODE_KIND,
+                js,
+                "adds up",
+                result="failed",
+                log=f"Error: no\n    at t ({url}:23:56)\n    at {js}:1:2",
+            )
+            with self.subTest(root=root), mock.patch.object(
+                rr.urllib.request, "urlopen", fake.urlopen
+            ), mock.patch.dict(os.environ, {"HOME": "/nonexistent-home"}):
+                registry.push([note], root=Path(root), out=io.StringIO())
+                (sent,) = fake.sent().values()
+                log = sent[1]["log"]
+                self.assertNotIn("invented", log)
+                self.assertNotIn("/srv", log)
+                self.assertIn("at t (test/unit/a.test.js:23:56)", log)
+                self.assertIn("at test/unit/a.test.js:1:2", log)
+
 
 FIXTURE_PY = """\
 import unittest
