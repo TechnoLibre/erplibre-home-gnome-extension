@@ -496,10 +496,10 @@ msgstr "Claude hooks"
 
 msgid ""
 "How the Claude session badges stay in sync with the agent. Install them once"
-" with make claude_install_hooks."
+" with hooks/install_claude_hooks.py (make claude_install_hooks in ERPLibre)."
 msgstr ""
 "How the Claude session badges stay in sync with the agent. Install them once"
-" with make claude_install_hooks."
+" with hooks/install_claude_hooks.py (make claude_install_hooks in ERPLibre)."
 
 msgid ""
 "Marks the session as active (green) and captures the focused window id for "
