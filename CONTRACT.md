@@ -222,13 +222,19 @@ route.
   `inactive`, `absent`; `decks`, the decks connected now, each with
   `serial`, `usb_product_id` (4 lowercase hex digits), `usb_path` and
   `firmware`. Unknown values are null, and so is a serial outside
-  `[A-Za-z0-9._-]{1,64}`, which Odoo refuses. A deck of the workstation
-  that `decks` does not list becomes disconnected.
+  `[A-Za-z0-9._-]{1,64}` or a `usb_product_id` of another form, which
+  Odoo refuses. Every text holds at most 256 characters, counted by code
+  point, and no NUL character: Odoo answers 400 `bad_request` to either,
+  so the extension cuts a longer text and drops the NUL. A deck with
+  neither a `serial` nor a `usb_path` cannot be named and is left out of
+  `decks` and of the events. A deck of the workstation that `decks` does
+  not list becomes disconnected.
 - `events`: the events not acknowledged yet, oldest first, each with
   `uuid`, `kind` (`plugged`, `unplugged` or `service_changed`), `at`
   (ISO 8601 in UTC, when the extension saw it), `serial`,
-  `usb_product_id`, `usb_path` and `service_state`. Odoo keeps one event
-  per uuid, so a report sent again duplicates nothing.
+  `usb_product_id`, `usb_path` and `service_state`, under the bounds of
+  `state`. Odoo keeps one event per uuid, so a report sent again
+  duplicates nothing.
 - `lost_events`: the running total of events the destination's queue
   dropped unsent; Odoo keeps the largest total it received.
 

@@ -245,6 +245,74 @@ test('a serial outside Odoo\'s pattern goes as none, in the state and the events
     }
 });
 
+// Odoo answers 400 bad_request to a text over 256 characters (counted as
+// Python does, by code point) or holding a NUL: one such field would hold
+// back every report of the destination.
+const ODOO_TEXT_MAX = 256;
+const fitsOdoo = v => v === null ||
+    (Array.from(v).length <= ODOO_TEXT_MAX && !v.includes('\0') &&
+        v.isWellFormed());
+
+test('every text of the state and the events fits what Odoo accepts', () => {
+    // 255 plain characters, then an astral one across the bound.
+    const long = `${'x'.repeat(255)}\u{1F600}${'y'.repeat(300)}`;
+    const deck = {serial: null, usb_product_id: '0063',
+        usb_path: `1-${'2.'.repeat(200)}3`, firmware: long};
+    const state = buildState({hostname: long, os: {name: long,
+        version: long}, gnomeShell: long, extensionVersion: long,
+    contractVersion: long, erplibre: {branch: long, commit: long},
+    deckProgram: long, serviceState: 'active', decks: [deck]});
+    const texts = [state.hostname, state.os.name, state.os.version,
+        state.gnome_shell, state.extension_version, state.contract_version,
+        state.erplibre.branch, state.erplibre.commit, state.deck_program,
+        state.decks[0].usb_path, state.decks[0].firmware];
+    for (const t of texts) assert.ok(fitsOdoo(t), String(t).slice(0, 20));
+    assert.equal(state.deck_program, `${'x'.repeat(255)}\u{1F600}`,
+        'cut by code point, the pair kept whole');
+    const [ev] = diffDecks([], [deck], '2026-01-01T00:00:00.000Z',
+        () => 'u1');
+    assert.equal(ev.usb_path, state.decks[0].usb_path,
+        'the event names the deck as the state does');
+    const nul = buildState({hostname: 'h', serviceState: 'active',
+        deckProgram: 'tiler\0x', os: {name: '\0', version: null}});
+    assert.equal(nul.deck_program, 'tilerx');
+    assert.equal(nul.os.name, null);
+});
+
+test('a product id Odoo would refuse goes as none', () => {
+    for (const product of ['84', '00840', 'zz84', '0x84']) {
+        const state = buildState({hostname: 'h', serviceState: 'active',
+            decks: [{serial: 'SN-INVENTED', usb_product_id: product,
+                usb_path: '1-2'}]});
+        assert.equal(state.decks[0].usb_product_id, null, product);
+    }
+    const state = buildState({hostname: 'h', serviceState: 'active',
+        decks: [{serial: 'SN-INVENTED', usb_product_id: '006D',
+            usb_path: '1-2'}]});
+    assert.equal(state.decks[0].usb_product_id, '006d');
+});
+
+test('a deck with neither a serial nor a USB path is left out', () => {
+    // Odoo cannot name such a deck and answers 400 to the whole report.
+    const nameless = {serial: 'SN INVENTED', usb_product_id: '0063',
+        usb_path: null};
+    const named = {serial: null, usb_product_id: '0063', usb_path: '1-4'};
+    const state = buildState({hostname: 'h', serviceState: 'active',
+        decks: [nameless, named]});
+    assert.deepEqual(state.decks.map(d => d.usb_path), ['1-4']);
+    assert.deepEqual(diffDecks([], [nameless], 'now', counter()), []);
+    assert.deepEqual(diffDecks([nameless], [], 'now', counter()), []);
+    const q = new EventQueue();
+    assert.equal(q.push({...event('a'), serial: null, usb_path: null}),
+        false, 'a deck event naming no deck is not queued');
+    assert.equal(q.push({...event('b'), kind: 'service_changed',
+        usb_path: null, usb_product_id: null, service_state: 'failed'}),
+    true, 'a service event names no deck');
+    const kept = EventQueue.fromJSON({events: [
+        {...event('c'), usb_path: null}, event('d')], lost: 0});
+    assert.deepEqual(kept.pending().map(e => e.uuid), ['d']);
+});
+
 test('buildState: missing parts become null, no checkout is null', () => {
     const state = buildState({hostname: 'h', serviceState: 'absent'});
     assert.deepEqual(state, {

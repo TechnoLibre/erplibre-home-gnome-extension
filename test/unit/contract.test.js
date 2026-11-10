@@ -335,7 +335,8 @@ test('the inventory section states the protocol, routes, codes and bounds',
 test('the inventory section names every key of the state and the events',
     () => {
         const inv = section('Odoo inventory');
-        const state = buildState({serviceState: 'active', decks: [{}]});
+        const state = buildState({serviceState: 'active',
+            decks: [{usb_path: '1-2'}]});
         const [event] = diffDecks([], [{serial: 'SN-INVENTED'}], 'now',
             () => 'u1');
         for (const key of [...Object.keys(state), ...Object.keys(state.os),
@@ -398,7 +399,11 @@ const WIRE_FACTS = [
         'reply 200 once the token is revoked']],
     ['`state`', ['`usb_product_id` (4 lowercase hex digits)',
         'A deck of the workstation that `decks` does not list becomes '
-            + 'disconnected']],
+            + 'disconnected',
+        'Every text holds at most 256 characters, counted by code point, '
+            + 'and no NUL character',
+        'A deck with neither a `serial` nor a `usb_path` cannot be named '
+            + 'and is left out of `decks` and of the events']],
     ['`events`', ['`at` (ISO 8601 in UTC, when the extension saw it)',
         'Odoo keeps one event per uuid']],
     ['`lost_events`', ['the running total of events the destination\'s '
