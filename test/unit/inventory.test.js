@@ -544,3 +544,30 @@ test('serializeDestinations keeps only the destination keys', () => {
     assert.deepEqual(parseDestinations(str), JSON.parse(str));
     assert.equal(serializeDestinations(null), '[]');
 });
+
+test('a destination never keeps the user part of its URL', () => {
+    const str = serializeDestinations([
+        {id: 'd1', url: 'https://user:pw-invented@odoo.example.invalid/odoo',
+            db: 'a'},
+        {id: 'd2', label: 'Mine user:pw-invented@odoo.example.invalid',
+            url: 'https://user:pw-invented@odoo.example.invalid', db: 'b'},
+        {id: 'd3', url: 'http://a@b:pw-invented@[::1]:8069', db: 'c'},
+        {id: 'd4', url: 'https://user:pw-invented@odoo.example.invalid/a b',
+            db: 'd'},
+    ]);
+    assert.doesNotMatch(str, /pw-invented|user/);
+    const dests = JSON.parse(str);
+    assert.deepEqual(dests.map(d => [d.url, d.label]), [
+        ['https://odoo.example.invalid/odoo',
+            'https://odoo.example.invalid/odoo'],
+        ['https://odoo.example.invalid', 'Mine odoo.example.invalid'],
+        ['http://[::1]:8069', 'http://[::1]:8069'],
+        ['https://odoo.example.invalid/a b',
+            'https://odoo.example.invalid/a b'],
+    ]);
+    assert.deepEqual(urlAllowed(dests[0].url), {ok: true, reason: null});
+    const [read] = parseDestinations(JSON.stringify([{id: 'd',
+        url: 'https://user:pw-invented@odoo.example.invalid', db: 'a'}]));
+    assert.equal(read.url, 'https://odoo.example.invalid');
+    assert.equal(read.label, 'https://odoo.example.invalid');
+});
