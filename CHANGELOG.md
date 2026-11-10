@@ -8,6 +8,17 @@ migrations that are not auto-applied.
 ## [Unreleased]
 
 ### Changed
+- The extension lives in its own repository,
+  `TechnoLibre/erplibre-home-gnome-extension`, with the history of its
+  files. ERPLibre clones it at `script/gnome-extension/erplibre_home/`,
+  by Google Repo or by its installer, and follows `main`. `CONTRACT.md`
+  (version 1.0) states what the extension and ERPLibre rely on from each
+  other; `test/unit/contract.test.js` holds the extension's half.
+- The tests run in a clone on their own: `npm test` runs the node suite
+  and the Python tests of `tools/` and `hooks/`, moved from ERPLibre to
+  `test/python/`. The controller path test runs only inside a checkout.
+- `metadata.json` and the About page point to this repository; the page's
+  source row is now "Source code".
 - The Games submenu sends `X-Stream-Deck-Gallery: 1` with `/launch/<id>`:
   the Stream Deck game gallery (games contract 2.0) refuses an action
   without it, so another site's page cannot launch a game through it. A
@@ -136,4 +147,4 @@ migrations that are not auto-applied.
   shell.
 - Nested gnome-shell E2E smoke test (`test/e2e_nested.sh`).
 
-[Unreleased]: https://github.com/ERPLibre/ERPLibre/tree/master/script/gnome-extension/erplibre_home
+[Unreleased]: https://github.com/TechnoLibre/erplibre-home-gnome-extension/commits/main
