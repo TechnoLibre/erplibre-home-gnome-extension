@@ -276,6 +276,23 @@ class TestStyleClasses(unittest.TestCase):
                 )
 
 
+class TestReadme(unittest.TestCase):
+    """The README is read on its own, in a clone or on the forge: every
+    relative path it names stays inside the repository and exists."""
+
+    def test_relative_paths_resolve_inside_the_repository(self):
+        for name in ("README.base.md", "hooks/README.base.md"):
+            readme = EXT / name
+            found = re.findall(r"\]\((?!https?:|mailto:|#)([^)\s]+)\)",
+                               _text(readme))
+            found += re.findall(r"`(\.\.?/[^`\s]+)`", _text(readme))
+            for rel in found:
+                with self.subTest(readme=name, path=rel):
+                    target = (readme.parent / rel.split("#")[0]).resolve()
+                    self.assertTrue(target.is_relative_to(EXT), rel)
+                    self.assertTrue(target.exists(), rel)
+
+
 @unittest.skipUnless(
     shutil.which("git") and (EXT / ".git").exists(), "not a git clone"
 )
