@@ -434,8 +434,8 @@ msgstr ""
 "sessions Claude, mpv, VLC, le serveur galerie et le tuilage Mutter sur le "
 "matériel Elgato."
 
-msgid "Source folder"
-msgstr "Répertoire source"
+msgid "Source code"
+msgstr "Code source"
 
 msgid "License"
 msgstr "Licence"

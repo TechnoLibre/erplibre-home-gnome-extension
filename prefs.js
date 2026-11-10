@@ -122,10 +122,9 @@ export default class ERPLibreHomePrefs extends ExtensionPreferences {
                 + 'Elgato hardware.'),
         });
         page.add(plugin);
-        plugin.add(this._linkRow(_('Source folder'),
-            'script/gnome-extension/erplibre_home/',
-            'https://github.com/ERPLibre/ERPLibre/tree/master/'
-                + 'script/gnome-extension/erplibre_home'));
+        plugin.add(this._linkRow(_('Source code'),
+            'github.com/TechnoLibre/erplibre-home-gnome-extension',
+            'https://github.com/TechnoLibre/erplibre-home-gnome-extension'));
         plugin.add(this._linkRow(_('License'), 'AGPL-3.0+',
             'https://www.gnu.org/licenses/agpl-3.0.html'));
 

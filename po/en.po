@@ -433,8 +433,8 @@ msgstr ""
 "Claude sessions, mpv, VLC, gallery server and Mutter window tiling onto the "
 "Elgato hardware."
 
-msgid "Source folder"
-msgstr "Source folder"
+msgid "Source code"
+msgstr "Source code"
 
 msgid "License"
 msgstr "License"
