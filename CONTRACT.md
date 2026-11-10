@@ -1,6 +1,6 @@
 # Contract between the extension and ERPLibre
 
-**Contract version: 1.1**
+**Contract version: 1.2**
 
 The extension runs on its own (see `README.md`). ERPLibre also clones this
 repository at `script/gnome-extension/erplibre_home/`, by Google Repo or by
@@ -150,7 +150,13 @@ check it.
      codes 2 (deck held by another program) and 3 (no deck with keys that
      show images) are final, not restarted;
    - the messages name `make erplibre_home_streamdeck_install` as the
-     install command.
+     install command;
+   - `$XDG_CONFIG_HOME/erplibre-home/streamdeck.conf`, read by
+     `script/install/erplibre_home_deck.sh`: the last line starting with
+     `DECK_PROGRAM=` names the deck program (`tiler` without one), which
+     the inventory reports; the inventory reads the state of the unit
+     with `systemctl --user show` (`LoadState`, `ActiveState`,
+     `SubState`).
 3. **Games gallery:** `script/stream_deck/games/gallery_server.py`, run by
    the Stream Deck venv's python, serves `http://localhost:8042` with
    `GET /api/games` and `GET /launch/<id>` (header
@@ -163,6 +169,96 @@ check it.
    `.venv.erplibre/bin/python script/selenium/web_login.py --url --user --pass`
    (xdotool when that venv is missing). One notice names
    `script/stream_deck/INSTALL.md`.
+5. **Odoo inventory:** an Odoo instance with the ERPLibre module
+   `erplibre_streamdeck` serves `/streamdeck/v1/enroll`,
+   `/streamdeck/v1/report` and `/streamdeck/v1/unenroll` as
+   [Odoo inventory](#odoo-inventory) states. Any Odoo the workstation
+   reaches serves, inside a checkout or not.
+
+## Odoo inventory
+
+The extension reports the Stream Decks of the workstation, and the state
+of its deck service, to each Odoo instance of the GSettings key
+`inventory-destinations`. The wire format has its own version,
+`"protocol": "1.0"` in every body and every reply, apart from this
+contract's: Odoo answers an unknown MAJOR with 400
+`protocol_unsupported`, accepts a newer MINOR and ignores the keys it does
+not know.
+
+**Transport.** HTTPS to any host; plain HTTP only to this machine
+(`localhost`, `127.0.0.0/8`, `[::1]`). A URL with a user part, a query or
+a fragment is refused, and no redirect is followed. Each call first sends
+`GET <url>/web/login?db=<db>` on a session that keeps cookies, which
+selects the database, then a POST whose body and reply are JSON objects.
+An error reply carries `error`, one of `bad_request`,
+`protocol_unsupported`, `credentials_refused`, `user_inactive`,
+`token_invalid`. A 404 means that this database does not serve the
+route.
+
+**Routes,** under the destination's URL:
+
+- `POST /streamdeck/v1/enroll`: body `protocol`, `method`, `fingerprint`,
+  `hostname`, and the secret of the method: `code` for `pairing_code`
+  (8 characters, case, spaces and hyphens ignored), `key` for `api_key`,
+  `login` and `password` for `password`. Reply 200: `workstation_id`,
+  `token`. Errors: 400 `bad_request` or `protocol_unsupported`, 401
+  `credentials_refused` (wrong, expired or used), 403 `user_inactive`.
+  The same user and fingerprint enrolling again keep their workstation,
+  whose token is replaced.
+- `POST /streamdeck/v1/report`: header `Authorization: Bearer <token>`,
+  body `protocol`, `state`, `events`, `lost_events`. Reply 200:
+  `accepted`, the uuids of the events stored or already known, and
+  `heartbeat_s`. Errors: 401 `token_invalid` (unknown or revoked token),
+  403 `user_inactive`, 400 `bad_request` or `protocol_unsupported`.
+- `POST /streamdeck/v1/unenroll`: the same header, body `protocol`;
+  reply 200 once the token is revoked.
+
+**Report.**
+
+- `state`: `hostname`; `os`, with `name` and `version`; `gnome_shell`;
+  `extension_version`; `contract_version`, this file's version;
+  `erplibre`, the `branch` and `commit` of the checkout, or null outside
+  one; `deck_program`; `service_state`, one of `active`, `failed`,
+  `inactive`, `absent`; `decks`, the decks connected now, each with
+  `serial`, `usb_product_id` (4 lowercase hex digits), `usb_path` and
+  `firmware`. Unknown values are null. A deck of the workstation that
+  `decks` does not list becomes disconnected.
+- `events`: the events not acknowledged yet, oldest first, each with
+  `uuid`, `kind` (`plugged`, `unplugged` or `service_changed`), `at`
+  (ISO 8601 in UTC, when the extension saw it), `serial`,
+  `usb_product_id`, `usb_path` and `service_state`. Odoo keeps one event
+  per uuid, so a report sent again duplicates nothing.
+- `lost_events`: the running total of events the destination's queue
+  dropped unsent; Odoo keeps the largest total it received.
+
+**Timing.** A report goes at the first USB scan, at each change, and
+every 900 s otherwise, or every `heartbeat_s` of the last reply; one at a
+time per destination. A call is abandoned after 10 s and counts as
+offline: its events wait in the queue of the destination, which keeps
+1000 events or 30 days, the oldest dropping first.
+
+**Identity and secrets.**
+
+- `fingerprint`: the HMAC-SHA256, keyed by `<uid>|<url>|<db>` (the URL
+  without its trailing slashes), of the stripped content of
+  `/etc/machine-id`, in 64 lowercase hex characters. The machine-id never
+  leaves the workstation; two destinations, or two users, see unrelated
+  values.
+- `token`: base64url of 32 random bytes, 43 characters; Odoo keeps only
+  its SHA-256. The workstation keeps it in the GNOME keyring only, under
+  the libsecret schema `ca.technolibre.erplibre-home.inventory` with the
+  attributes `destination` (the destination id), `url` and `db`: the
+  token of one Odoo never goes to another. A pairing code, an API key or
+  a password serves the one enrollment call and is never stored.
+- `inventory-destinations`: a JSON array of destinations, each with
+  `id`, `label`, `url`, `db`, `source` (`local` for an entry of the
+  `instances` key, then named by `instanceId`, or `remote`); no secret.
+- `$XDG_STATE_HOME/erplibre-home/inventory/<id>.json`, mode 0600, one per
+  destination, written by the extension only:
+  `{destination: {url, db}, queue: {events, lost}, status: {state,
+  pending, lastReport, error}}`, read back only when it names the
+  destination's URL and database. It never holds a secret; ERPLibre does
+  not read it.
 
 ## Versioning
 
@@ -176,6 +272,13 @@ ERPLibre's tests fail when the MAJOR it records differs from this one.
 They read from this repository only what this file states, and the
 values it gives; the tests of this repository hold the code to them.
 ERPLibre follows `main`: a MAJOR change is pushed on both sides together.
+The wire of the Odoo inventory is versioned by its `protocol` the same
+way, MAJOR for what Odoo can see, MINOR for an optional addition; this
+file's version moves with it.
+
+- **1.2:** the Odoo inventory: the extension enrolls with and reports to
+  the routes of the Odoo module `erplibre_streamdeck`, and reads
+  `streamdeck.conf` and the state of the deck unit.
 
 - **1.1:** the test commands, the records of the shared state files and
   the journal lines are stated.

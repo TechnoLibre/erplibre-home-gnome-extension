@@ -1,8 +1,10 @@
 # Architecture
 
 How the GNOME extension, the Stream Deck driver and Claude Code hooks
-talk to each other. Everything is local: no daemons, no network, no
-persistent storage outside `$XDG_STATE_HOME/erplibre-home/`.
+talk to each other. Everything is local but the Odoo inventory, which
+pushes to the Odoo instances the user enrolled: no daemon, no inbound
+connection, no persistent storage outside `$XDG_STATE_HOME/erplibre-home/`
+and, for the inventory tokens, the GNOME keyring.
 
 ## Process map
 
@@ -61,6 +63,33 @@ persistent storage outside `$XDG_STATE_HOME/erplibre-home/`.
    page refreshes every `DECK_SESSION_REFRESH_SEC` and goes home when its
    session ends.
 
+## Data flow: Stream Deck → Odoo inventory
+
+1. **Watch.** `InventoryService` (`lib/inventory-service.js`), created at
+   `enable()` whatever indicator is shown, lists the Elgato decks through
+   `UsbWatch` (`lib/usb-watch.js`: GUdev uevents, else an asynchronous
+   `lsusb` poll every `POLL_S`) and polls the deck unit with
+   `systemctl --user show`.
+2. **Queue.** Each change becomes dated events (`diffDecks`,
+   `serviceChanged` in `lib/inventory.js`), queued per destination in an
+   `EventQueue` and saved in its state file,
+   `$XDG_STATE_HOME/erplibre-home/inventory/<id>.json` (mode 0600).
+3. **Report.** One report at a time per destination, at each change and
+   every `heartbeat_s`: `postJson` (`lib/odoo-http.js`, Soup 3) selects
+   the database, then posts the state and the queued events with the
+   token that `lib/secret-store.js` finds in the keyring. Odoo's
+   `accepted` uuids leave the queue; a call past `TIMEOUT_S` is
+   cancelled and retried later; a revoked token stops the reports.
+4. **Show.** The device indicator reads `decks()` and the statuses from
+   the service: its deck list and its inventory line.
+5. **Enroll.** The preferences page « Odoo inventory » (`prefs.js` on
+   `lib/inventory-prefs.js`) writes the destinations to
+   `inventory-destinations`, enrolls them (`/streamdeck/v1/enroll`, the
+   token to the keyring) and reads the state files for the statuses. The
+   service picks a new token up within `POLL_S`.
+
+The wire protocol is in `CONTRACT.md`, section « Odoo inventory ».
+
 ## Key surfaces
 
 | Layer | Code | Notes |
@@ -71,6 +100,9 @@ persistent storage outside `$XDG_STATE_HOME/erplibre-home/`.
 | Indicator | `indicators/pencil.js` | Lazy import so node tests can read `lib/`. |
 | D-Bus | `extension.js` | Interface `org.gnome.Shell.Extensions.ERPLibreHome` exposes `FocusClaudeSession`, `GetFocusedWindowId`, `AcceptClaudeSession`, `SetClaudeSessionWindow`, `KillClaudeSession`, `RenameClaudeSession`, `DebugClaudeIndex`, `ListMpvSessions`, `MpvSendCommand`, `TileWindow`, `OpenPath`, `OpenMedia`, etc. |
 | Driver | `script/stream_deck/erplibre_streamdeck/` (package, one plugin per feature) | Python streamdeck library, reads the same state directories, calls back into the extension over D-Bus. |
+| Inventory | `lib/inventory.js` | Pure: URL policy, fingerprint, wire state and events, `EventQueue`, report and enrollment bodies and replies. Unit-tested. |
+| Inventory service | `lib/inventory-service.js`, `lib/usb-watch.js`, `lib/odoo-http.js`, `lib/secret-store.js` | Runs in GNOME Shell; asynchronous only. Tested on the fakes of `test/unit/gjs-fake.js`. |
+| Inventory preferences | `lib/inventory-prefs.js`, `prefs.js` | Destinations, enrollment, status; runs in the preferences process. |
 
 ## D-Bus interface
 

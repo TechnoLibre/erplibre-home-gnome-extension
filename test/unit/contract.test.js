@@ -16,6 +16,10 @@ import {DECK_UNIT, CONTROLLER_REL, DECK_ENTRY_REL, deckLockPath}
 import {projectRootFrom, STREAMDECK_PYTHON_REL, GALLERY_SERVER_REL}
     from '../../lib/project-root.js';
 import {GALLERY_ACTION_HEADER} from '../../lib/gallery-launch.js';
+import {INVENTORY_PROTOCOL, HEARTBEAT_S, TIMEOUT_S, QUEUE_MAX,
+    QUEUE_MAX_AGE_DAYS, ENROLL_PATH, REPORT_PATH, UNENROLL_PATH,
+    ENROLL_METHODS, ERROR_CODES, buildState, diffDecks}
+    from '../../lib/inventory.js';
 
 const ROOT = new URL('../../', import.meta.url);
 
@@ -285,3 +289,75 @@ test('the controller menu reaches the gallery the contract states', () => {
         "get_request_headers().append(GALLERY_ACTION_HEADER, '1')"));
     assert.ok(FLAT.includes(`\`${GALLERY_ACTION_HEADER}: 1\``));
 });
+
+// The Odoo inventory: the extension's side of the wire protocol that the
+// Odoo module erplibre_streamdeck serves. The constants are read from
+// lib/inventory.js; the GJS modules (keyring, state file) are read as text,
+// since importing them needs the fakes of gjs-fake.js.
+
+test('the contract is at 1.2 since the extension reports to Odoo', () => {
+    assert.ok(CONTRACT.includes('**Contract version: 1.2**'));
+    assert.match(section('Versioning'), /^- \*\*1\.2:\*\* /m);
+    const service = text('lib/inventory-service.js');
+    assert.ok(service.includes("export const CONTRACT_VERSION = '1.2';"));
+});
+
+test('the extension relies on the Odoo routes of the inventory section', () => {
+    const relies = section('What the extension relies on').replace(/\s+/g, ' ');
+    assert.ok(relies.includes('`erplibre_streamdeck`'));
+    for (const route of [ENROLL_PATH, REPORT_PATH, UNENROLL_PATH])
+        assert.ok(relies.includes(`\`${route}\``), route);
+    assert.ok(relies.includes('[Odoo inventory](#odoo-inventory)'));
+    // What the reports read of the Stream Deck level.
+    assert.ok(relies.includes('`$XDG_CONFIG_HOME/erplibre-home/streamdeck.conf`'));
+    assert.ok(relies.includes('`DECK_PROGRAM=`'));
+    assert.ok(relies.includes('`systemctl --user show`'));
+});
+
+test('the inventory section states the protocol, routes, codes and bounds',
+    () => {
+        const inv = section('Odoo inventory').replace(/\s+/g, ' ');
+        assert.ok(inv.includes(`\`"protocol": "${INVENTORY_PROTOCOL}"\``));
+        for (const route of [ENROLL_PATH, REPORT_PATH, UNENROLL_PATH])
+            assert.ok(inv.includes(`\`POST ${route}\``), route);
+        for (const code of ERROR_CODES)
+            assert.ok(inv.includes(`\`${code}\``), code);
+        for (const method of ENROLL_METHODS)
+            assert.ok(inv.includes(`\`${method}\``), method);
+        assert.ok(inv.includes(`every ${HEARTBEAT_S} s`));
+        assert.ok(inv.includes(`after ${TIMEOUT_S} s`));
+        assert.ok(inv.includes(`${QUEUE_MAX} events or ${QUEUE_MAX_AGE_DAYS} days`));
+        assert.ok(inv.includes('`GET <url>/web/login?db=<db>`'));
+        assert.ok(inv.includes('`Authorization: Bearer <token>`'));
+    });
+
+test('the inventory section names every key of the state and the events',
+    () => {
+        const inv = section('Odoo inventory');
+        const state = buildState({serviceState: 'active', decks: [{}]});
+        const [event] = diffDecks([], [{serial: 'SN-INVENTED'}], 'now',
+            () => 'u1');
+        for (const key of [...Object.keys(state), ...Object.keys(state.os),
+            ...Object.keys(state.decks[0]), ...Object.keys(event),
+            'events', 'lost_events', 'accepted', 'heartbeat_s',
+            'workstation_id', 'token', 'fingerprint', 'hostname', 'error'])
+            assert.ok(inv.includes(`\`${key}\``), key);
+    });
+
+test('the inventory section states where the workstation keeps its part',
+    () => {
+        const inv = section('Odoo inventory').replace(/\s+/g, ' ');
+        const secret = text('lib/secret-store.js');
+        const schema = secret.match(/^export const SECRET_SCHEMA = '([^']+)';$/m)[1];
+        assert.ok(inv.includes(`\`${schema}\``), schema);
+        for (const attribute of ['destination', 'url', 'db'])
+            assert.ok(inv.includes(`\`${attribute}\``), attribute);
+        const service = text('lib/inventory-service.js');
+        assert.ok(service.includes(
+            '/erplibre-home/inventory/${destId}.json`;'));
+        assert.ok(inv.includes(
+            '`$XDG_STATE_HOME/erplibre-home/inventory/<id>.json`'));
+        assert.ok(inv.includes('`inventory-destinations`'));
+        assert.ok(text('schemas/org.gnome.shell.extensions.erplibre-home'
+            + '.gschema.xml').includes('<key name="inventory-destinations"'));
+    });

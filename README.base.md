@@ -222,7 +222,7 @@ ERPLibre garde aussi les captures d'écran de l'extension et du deck, dans
 
 `gnome-extensions prefs erplibre-home@technolibre.ca`
 
-Pages: Buttons, Pencil, Media, ERPLibre, Network, Device, Theming, Sync, Advanced, About.
+Pages: Buttons, Pencil, Media, ERPLibre, Network, Device, Odoo inventory, Theming, Advanced, Sync, Log, Help, About.
 
 ## GSettings keys
 
@@ -239,6 +239,40 @@ Schema id `org.gnome.shell.extensions.erplibre-home`. Selected keys:
 - `enable-git-sync` (`b`), `git-sync-path` (`s`)
 - `enable-icon-badges` (`b`, default `true`) — show count circles on top-bar icons
 - `enable-claude-state-watch` (`b`, default `true`) — watch Claude session state files for the pencil badge
+- `inventory-destinations` (`s`, JSON array) — the Odoo instances that receive the Stream Deck inventory; no token there, the tokens live in the GNOME keyring
+
+## Odoo inventory
+
+The extension can report the Stream Decks of the workstation to one or
+more Odoo instances that have the ERPLibre module `erplibre_streamdeck`:
+which decks are plugged and since when, the deck program and the state of
+its service, the system, and the versions of GNOME Shell, of the extension
+and of the ERPLibre checkout. Odoo keeps the inventory and the history of
+the plugs and unplugs; it never connects to the workstation.
+
+In the preferences, page **Odoo inventory**:
+
+1. add a destination: an instance of the ERPLibre indicator, or any Odoo
+   by its URL, and its database. HTTPS is required, except to this
+   machine (`localhost`, `127.0.0.0/8`, `[::1]`: a local instance, an SSH
+   tunnel);
+2. enroll it with a pairing code (in Odoo, **Stream Deck › My workstations
+   › Add a workstation**: 8 characters, valid 10 minutes, used once), an
+   API key, or a login and password;
+3. its row then shows the status: up to date, offline with the events
+   waiting, enrollment revoked, or refused with the reason. The menu of
+   the device indicator says the same in one line.
+
+Odoo returns a workstation token, which lives in the GNOME keyring
+(libsecret schema `ca.technolibre.erplibre-home.inventory`) and nowhere
+else; the code, key or password is sent once and never kept. **Unenroll**
+revokes the token in Odoo and forgets it here; **Remove** does the same,
+then deletes the destination and its state file.
+
+While Odoo is down or slow, the events wait in a queue per destination
+(1000 events or 30 days) and reach Odoo with the time they happened: GNOME
+Shell never waits for Odoo. The wire protocol is in
+[CONTRACT.md](CONTRACT.md), section « Odoo inventory ».
 
 ## Icon badges
 
@@ -301,7 +335,7 @@ extension reloads itself from a copy under a new UUID:
 
 `gnome-extensions prefs erplibre-home@technolibre.ca`
 
-Pages : Buttons, Pencil, Media, ERPLibre, Network, Device, Theming, Sync, Advanced, About.
+Pages : Buttons, Pencil, Media, ERPLibre, Network, Device, Inventaire Odoo, Theming, Advanced, Sync, Log, Help, About.
 
 ## Clés GSettings
 
@@ -318,6 +352,41 @@ Schéma `org.gnome.shell.extensions.erplibre-home`. Clés notables :
 - `enable-git-sync` (`b`), `git-sync-path` (`s`)
 - `enable-icon-badges` (`b`, défaut `true`) — affiche les pastilles de comptage sur les icônes
 - `enable-claude-state-watch` (`b`, défaut `true`) — surveille les fichiers d'état Claude pour le badge du crayon
+- `inventory-destinations` (`s`, JSON) — les instances Odoo qui reçoivent l'inventaire des Stream Deck ; aucun jeton là, les jetons vivent dans le trousseau GNOME
+
+## Inventaire Odoo
+
+L'extension peut remonter les Stream Deck du poste à une ou plusieurs
+instances Odoo qui ont le module ERPLibre `erplibre_streamdeck` : quels
+decks sont branchés et depuis quand, le programme du deck et l'état de son
+service, le système, et les versions de GNOME Shell, de l'extension et du
+checkout ERPLibre. Odoo tient l'inventaire et l'historique des
+branchements ; il ne se connecte jamais au poste.
+
+Dans les préférences, page **Inventaire Odoo** :
+
+1. ajouter une destination : une instance de l'indicateur ERPLibre, ou
+   tout Odoo par son URL, et sa base de données. HTTPS est exigé, sauf
+   vers cette machine (`localhost`, `127.0.0.0/8`, `[::1]` : une instance
+   locale, un tunnel SSH) ;
+2. l'inscrire par un code d'appairage (dans Odoo, **Stream Deck › Mes
+   postes › Ajouter un poste** : 8 caractères, valable 10 minutes, à usage
+   unique), une clé d'API, ou un identifiant et un mot de passe ;
+3. sa ligne montre ensuite l'état : à jour, hors ligne avec les événements
+   en attente, inscription révoquée, ou refusé avec la raison. Le menu de
+   l'indicateur device dit la même chose en une ligne.
+
+Odoo rend un jeton de poste, qui vit dans le trousseau GNOME (schéma
+libsecret `ca.technolibre.erplibre-home.inventory`) et nulle part
+ailleurs ; le code, la clé ou le mot de passe n'est envoyé qu'une fois et
+n'est jamais gardé. **Désinscrire** révoque le jeton dans Odoo et l'oublie
+ici ; **Retirer** fait de même, puis supprime la destination et son
+fichier d'état.
+
+Quand Odoo est arrêté ou lent, les événements attendent dans une file par
+destination (1000 événements ou 30 jours) et arrivent dans Odoo avec
+l'heure où ils ont eu lieu : GNOME Shell n'attend jamais Odoo. Le protocole
+est dans [CONTRACT.md](CONTRACT.md), section « Odoo inventory ».
 
 ## Pastilles de comptage
 

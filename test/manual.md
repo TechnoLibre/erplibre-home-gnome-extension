@@ -98,6 +98,28 @@ Run after each `gnome-extensions enable` cycle.
 - [ ] Restart deck → controller exits + relaunches (PID changes; on SIGTERM the controller resets its decks and removes its pidfile before exiting)
 - [ ] Show details → notification with truncated `lsusb -v` output
 
+## Odoo inventory
+
+Against an Odoo 18 with the module `erplibre_streamdeck`, a user of it,
+and this workstation's Stream Deck.
+
+- [ ] Prefs › Odoo inventory: « No destination yet » when the key is empty
+- [ ] Add `http://192.0.2.1:8069` + a database → refused, the row under the form says plain HTTP is accepted only to this machine; nothing is stored
+- [ ] Add `https://user:pw@…` → refused, the user part is named; `gsettings get … inventory-destinations` holds no password
+- [ ] Add from an instance of the ERPLibre indicator → the URL is the instance's and cannot be edited; the name defaults to the instance's
+- [ ] Add the same Odoo and database twice → refused as already a destination
+- [ ] In Odoo, Stream Deck › My workstations › Add a workstation shows a code; enroll with it → « Enrolled… », then within ~10 s the status reads « Up to date » with the time of the last report; the workstation appears in Odoo with its decks
+- [ ] The code, key and password fields are empty once the call is over, success or not; the password and key fields never show their text
+- [ ] The same code a second time → « Odoo refused these credentials… »
+- [ ] Enroll by API key, then by login and password → each works; a wrong password is refused
+- [ ] `secret-tool search destination <id>` shows one item of schema `ca.technolibre.erplibre-home.inventory`; `grep -r <token> ~/.local/state/erplibre-home ~/.config/dconf` finds nothing
+- [ ] Unplug and plug the deck → the device menu line stays « Inventory: up to date » and Odoo shows the events with their real time
+- [ ] Stop Odoo, unplug the deck → the status reads « Offline (1 pending) » and the device menu « Inventory: offline (1 pending) »; GNOME Shell stays responsive; start Odoo → the queue drains, the event keeps the time it happened
+- [ ] Revoke the token in Odoo → the status reads « Enrollment revoked »; enroll again → « Up to date »
+- [ ] Unenroll → « Unenrolled: Odoo revoked the token. », the keyring item is gone, Odoo shows the workstation without a token
+- [ ] Remove → asks a second click (« Confirm removal »), then the destination and its file under `~/.local/state/erplibre-home/inventory/` are gone
+- [ ] `LANG=fr_CA.UTF-8 gnome-extensions prefs erplibre-home@technolibre.ca` shows the page as « Inventaire Odoo », in French throughout
+
 ## Cross-cutting (Plan G)
 
 ### i18n

@@ -45,6 +45,8 @@
  *   client in `fake.udevClients`, and `fake.udevEmit(action, device)` runs
  *   their `uevent` handlers; `fake.udevMissing` makes the constructor
  *   throw, as a missing typelib does.
+ * - GLib.compute_hmac_for_string computes the HMAC with node's crypto;
+ *   Gio.Credentials gives `fake.uid` as the process's Unix user.
  * - Anything else is loose: any property, call or `new` of it gives another
  *   loose value, so widget-building code runs without being asserted on.
  *
@@ -54,7 +56,7 @@
 
 import {registerHooks} from 'node:module';
 import {spawnSync} from 'node:child_process';
-import {randomUUID} from 'node:crypto';
+import {createHmac, randomUUID} from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -144,6 +146,7 @@ export const fake = {
                 h.cb(c, action, device);
     },
     settings: null,
+    uid: 1000,
     root: '',
     env: {},
     /**
@@ -163,6 +166,7 @@ export const fake = {
         this.udevClients = [];
         this.udevMissing = false;
         this.settings = null;
+        this.uid = 1000;
         const {root, env} = freshEnv();
         this.root = root;
         this.env = env;
@@ -229,9 +233,16 @@ function addTimeout(ms, fn) {
     return id;
 }
 
+const ChecksumType = {MD5: 0, SHA1: 1, SHA256: 2, SHA512: 3, SHA384: 4};
+const CHECKSUM_NAMES = ['md5', 'sha1', 'sha256', 'sha512', 'sha384'];
+
 const GLib = looseObject({
     Bytes,
     FileTest,
+    ChecksumType,
+    compute_hmac_for_string: (type, key, str, _length) =>
+        createHmac(CHECKSUM_NAMES[type], Buffer.from(key)).update(str)
+            .digest('hex'),
     PRIORITY_DEFAULT: 0,
     PRIORITY_LOW: 300,
     SOURCE_REMOVE: false,
@@ -381,6 +392,10 @@ class FakeFile {
         this._later(cb, () => { fs.mkdirSync(this._p); return true; });
     }
     make_directory_finish(res) { return this._finish(res); }
+    delete_async(_prio, _c, cb) {
+        this._later(cb, () => { fs.unlinkSync(this._p); return true; });
+    }
+    delete_finish(res) { return this._finish(res); }
     query_info_async(_attrs, _flags, _prio, _c, cb) {
         this._later(cb, () => {
             const target = fs.readlinkSync(this._p);
@@ -410,8 +425,13 @@ class Cancellable {
     disconnect() {}
 }
 
+class Credentials {
+    get_unix_user() { return fake.uid; }
+}
+
 const Gio = looseObject({
     SubprocessFlags,
+    Credentials,
     Subprocess: looseObject({new: newSubprocess}),
     File: looseObject({new_for_path: p => new FakeFile(p)}),
     FileCreateFlags: {NONE: 0, REPLACE_DESTINATION: 1, PRIVATE: 2},
@@ -719,6 +739,16 @@ class Extension {
     gettext(s) { return s; }
 }
 
+// The base class of prefs.js, in the preferences process.
+class ExtensionPreferences {
+    constructor(metadata = {}) {
+        this.metadata = metadata;
+        this.path = metadata.path ?? fake.root;
+    }
+    getSettings() { return fake.settings; }
+    gettext(s) { return s; }
+}
+
 const RESOURCES = {
     'resource:///org/gnome/shell/ui/main.js': {
         notify: (title, body) => fake.notified.push([title, body]),
@@ -747,6 +777,8 @@ const RESOURCES = {
     'resource:///org/gnome/shell/ui/modalDialog.js': {ModalDialog},
     'resource:///org/gnome/shell/extensions/extension.js': {Extension},
     'resource:///org/gnome/shell/misc/config.js': {PACKAGE_VERSION: '48.0'},
+    'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js':
+        {ExtensionPreferences},
 };
 
 const GI = {

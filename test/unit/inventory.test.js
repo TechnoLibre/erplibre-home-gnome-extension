@@ -574,3 +574,229 @@ test('a destination never keeps the user part of its URL', () => {
     assert.equal(read.url, 'https://odoo.example.invalid');
     assert.equal(read.label, 'https://odoo.example.invalid');
 });
+
+// --- the preferences' half: destination form, enrollment, state file ---
+
+const {ENROLL_PATH, REPORT_PATH, UNENROLL_PATH, ENROLL_METHODS, ERROR_CODES,
+    normalizeUrl, checkDestination, enrollBody, parseEnrollReply,
+    parseUnenrollReply, statusFromStateFile} =
+    await import('../../lib/inventory.js');
+
+const FP = 'a'.repeat(64);
+const TOKEN = 'T'.repeat(43);
+
+test('the routes, methods and error codes are those of the wire contract',
+    () => {
+        assert.equal(ENROLL_PATH, '/streamdeck/v1/enroll');
+        assert.equal(REPORT_PATH, '/streamdeck/v1/report');
+        assert.equal(UNENROLL_PATH, '/streamdeck/v1/unenroll');
+        assert.deepEqual(ENROLL_METHODS, ['pairing_code', 'api_key',
+            'password']);
+        assert.deepEqual(ERROR_CODES, ['bad_request', 'protocol_unsupported',
+            'credentials_refused', 'user_inactive', 'token_invalid']);
+    });
+
+test('normalizeUrl trims, drops trailing slashes, lowercases scheme and host',
+    () => {
+        assert.equal(normalizeUrl('  HTTPS://Odoo.Example.Invalid/Odoo/ '),
+            'https://odoo.example.invalid/Odoo');
+        assert.equal(normalizeUrl('http://LOCALHOST:8069///'),
+            'http://localhost:8069');
+        assert.equal(normalizeUrl('http://[::1]:8069/'), 'http://[::1]:8069');
+        assert.equal(normalizeUrl('not a url'), 'not a url');
+        assert.equal(normalizeUrl(null), '');
+    });
+
+test('checkDestination gives the destination to store, URL normalised', () => {
+    assert.deepEqual(checkDestination(
+        {url: ' https://Odoo.Example.Invalid/ ', db: ' base_1 ',
+            label: '  Head office  '}, []),
+    {ok: true, reason: null, url: 'https://odoo.example.invalid',
+        db: 'base_1', label: 'Head office'});
+    const r = checkDestination({url: 'http://127.0.0.5:8069', db: 'b-2.x'},
+        []);
+    assert.equal(r.ok, true);
+    assert.equal(r.label, '127.0.0.5:8069', 'the host is the default name');
+});
+
+test('checkDestination says why a URL is refused, as urlAllowed does', () => {
+    const reason = url => checkDestination({url, db: 'base'}, []).reason;
+    assert.equal(reason('http://192.0.2.1'), 'plain_http');
+    assert.equal(reason('http://localhost.example.invalid'), 'plain_http');
+    assert.equal(reason('ftp://odoo.example.invalid'), 'scheme');
+    assert.equal(reason('https://u:pw-invented@odoo.example.invalid'),
+        'credentials');
+    assert.equal(reason('https://odoo.example.invalid/?db=x'), 'invalid');
+    assert.equal(reason(''), 'invalid');
+    assert.equal(checkDestination({url: 'http://192.0.2.1', db: 'base'}, [])
+        .ok, false);
+});
+
+test('checkDestination refuses a database name Odoo would refuse', () => {
+    for (const db of ['', ' ', 'a', '-base', 'base x', 'base/x', 'bäse',
+        'b'.repeat(64), null])
+        assert.equal(checkDestination({url: 'https://o.example.invalid', db},
+            []).reason, 'db', String(db));
+    for (const db of ['ab', 'Base_1', '1.base-x', 'b'.repeat(63)])
+        assert.equal(checkDestination({url: 'https://o.example.invalid', db},
+            []).ok, true, db);
+});
+
+test('checkDestination refuses the same Odoo and database twice', () => {
+    const existing = [{id: 'd1', url: 'https://odoo.example.invalid',
+        db: 'base', label: 'x', source: 'remote', instanceId: null}];
+    assert.equal(checkDestination({url: 'HTTPS://odoo.example.invalid/',
+        db: 'base'}, existing).reason, 'duplicate');
+    assert.equal(checkDestination({url: 'https://odoo.example.invalid',
+        db: 'other'}, existing).ok, true);
+    assert.equal(checkDestination({url: 'https://odoo.example.invalid/x',
+        db: 'base'}, existing).ok, true);
+});
+
+test('checkDestination keeps a label short and on one line', () => {
+    const r = checkDestination({url: 'https://o.example.invalid', db: 'ab',
+        label: `a\nb\tc${'x'.repeat(200)}`}, []);
+    assert.equal(r.label, `a b c${'x'.repeat(75)}`);
+    assert.equal(r.label.length, 80);
+});
+
+test('enrollBody builds the body of each method, protocol first', () => {
+    const facts = {fingerprint: FP, hostname: 'deckhost'};
+    assert.deepEqual(enrollBody({method: 'pairing_code', code: ' abcd-efgh '},
+        facts), {ok: true, error: null, body: {protocol: '1.0',
+        method: 'pairing_code', fingerprint: FP, hostname: 'deckhost',
+        code: 'ABCDEFGH'}});
+    assert.deepEqual(enrollBody({method: 'api_key', key: ' KEY-INVENTED '},
+        facts).body, {protocol: '1.0', method: 'api_key', fingerprint: FP,
+        hostname: 'deckhost', key: 'KEY-INVENTED'});
+    assert.deepEqual(enrollBody({method: 'password', login: ' someone ',
+        password: ' pw invented '}, facts).body, {protocol: '1.0',
+        method: 'password', fingerprint: FP, hostname: 'deckhost',
+        login: 'someone', password: ' pw invented '});
+});
+
+test('enrollBody carries only the secret of the chosen method', () => {
+    const all = {code: 'ABCDEFGH', key: 'KEY-INVENTED', login: 'someone',
+        password: 'PW-INVENTED'};
+    const facts = {fingerprint: FP, hostname: 'h'};
+    assert.deepEqual(Object.keys(enrollBody({...all, method: 'pairing_code'},
+        facts).body).sort(), ['code', 'fingerprint', 'hostname', 'method',
+        'protocol']);
+    assert.doesNotMatch(JSON.stringify(enrollBody({...all,
+        method: 'api_key'}, facts).body), /PW-INVENTED|ABCDEFGH/);
+    assert.doesNotMatch(JSON.stringify(enrollBody({...all,
+        method: 'password'}, facts).body), /KEY-INVENTED|ABCDEFGH/);
+});
+
+test('enrollBody refuses an empty field, a malformed code, a long value',
+    () => {
+        const facts = {fingerprint: FP, hostname: 'h'};
+        const error = c => enrollBody(c, facts).error;
+        assert.equal(error({method: 'pairing_code', code: '  '}), 'missing');
+        assert.equal(error({method: 'api_key', key: ''}), 'missing');
+        assert.equal(error({method: 'password', login: 'a', password: ''}),
+            'missing');
+        assert.equal(error({method: 'password', login: ' ', password: 'p'}),
+            'missing');
+        assert.equal(error({method: 'other', key: 'k'}), 'missing');
+        assert.equal(error({}), 'missing');
+        for (const code of ['ABCDEFG', 'ABCDEFGHJ', 'ABCDEF0H', 'ABCDEFIH',
+            'ABCDEF1H', 'ABCDEFOH', 'ABCD_EFG'])
+            assert.equal(error({method: 'pairing_code', code}), 'code_format',
+                code);
+        assert.equal(error({method: 'api_key', key: 'k'.repeat(4097)}),
+            'too_long');
+        assert.equal(error({method: 'password', login: 'l'.repeat(257),
+            password: 'p'}), 'too_long');
+        assert.equal(error({method: 'password', login: 'l',
+            password: 'p'.repeat(4097)}), 'too_long');
+        assert.equal(enrollBody({method: 'api_key', key: 'k'}, facts).body
+            === undefined, false);
+        assert.equal(enrollBody({method: 'api_key', key: ''}, facts).body,
+            null);
+    });
+
+test('enrollBody sends a host name Odoo accepts', () => {
+    const body = h => enrollBody({method: 'api_key', key: 'k'},
+        {fingerprint: FP, hostname: h}).body.hostname;
+    assert.equal(body('h'.repeat(300)), 'h'.repeat(256));
+    assert.equal(body(''), 'workstation');
+    assert.equal(body(null), 'workstation');
+});
+
+test('parseEnrollReply takes the token and the workstation id of a 200', () => {
+    assert.deepEqual(parseEnrollReply(200, {protocol: '1.0',
+        workstation_id: 7, token: TOKEN}),
+    {ok: true, token: TOKEN, workstationId: 7, error: null});
+    for (const json of [{workstation_id: 7}, {token: TOKEN},
+        {workstation_id: '7', token: TOKEN}, {workstation_id: 0, token: TOKEN},
+        {workstation_id: 7, token: 'short'},
+        {workstation_id: 7, token: `${'T'.repeat(42)}\n`},
+        {workstation_id: 7, token: `${'T'.repeat(40)} x y`}, null, []])
+        assert.deepEqual(parseEnrollReply(200, json),
+            {ok: false, token: null, workstationId: null, error: 'bad_reply'},
+            JSON.stringify(json));
+});
+
+test('parseEnrollReply gives the error codes of the contract', () => {
+    const error = (s, j) => parseEnrollReply(s, j).error;
+    assert.equal(error(401, {error: 'credentials_refused'}),
+        'credentials_refused');
+    assert.equal(error(403, {error: 'user_inactive'}), 'user_inactive');
+    assert.equal(error(400, {error: 'protocol_unsupported'}),
+        'protocol_unsupported');
+    assert.equal(error(400, {error: 'bad_request'}), 'bad_request');
+    assert.equal(error(0, null), 'network');
+    assert.equal(error(502, null), 'network');
+    assert.equal(error(404, null), 'not_found');
+    assert.equal(error(400, {error: 'something_else'}), 'bad_reply');
+    assert.equal(error(302, null), 'bad_reply');
+    assert.equal(parseEnrollReply(401, {error: 'credentials_refused'}).token,
+        null);
+});
+
+test('parseUnenrollReply: a token Odoo no longer accepts is revoked too', () => {
+    assert.deepEqual(parseUnenrollReply(200, {protocol: '1.0'}),
+        {ok: true, revoked: true, error: null});
+    assert.deepEqual(parseUnenrollReply(401, {error: 'token_invalid'}),
+        {ok: false, revoked: true, error: 'token_invalid'});
+    assert.deepEqual(parseUnenrollReply(403, {error: 'user_inactive'}),
+        {ok: false, revoked: true, error: 'user_inactive'});
+    for (const [s, j, e] of [[0, null, 'network'], [500, null, 'network'],
+        [404, null, 'not_found'], [400, {error: 'protocol_unsupported'},
+            'protocol_unsupported'], [200, 'x', 'bad_reply']])
+        assert.deepEqual(parseUnenrollReply(s, j),
+            {ok: false, revoked: false, error: e}, `${s}`);
+});
+
+test('statusFromStateFile reads the status the service saved', () => {
+    const dest = {id: 'd1', url: 'https://odoo.example.invalid/', db: 'base'};
+    const text = JSON.stringify({
+        destination: {url: 'https://odoo.example.invalid', db: 'base'},
+        queue: {events: [], lost: 0},
+        status: {state: 'offline', pending: 3,
+            lastReport: '2026-01-10T12:00:00.000Z', error: 'network'},
+    });
+    assert.deepEqual(statusFromStateFile(text, dest), {state: 'offline',
+        pending: 3, lastReport: '2026-01-10T12:00:00.000Z', error: 'network'});
+});
+
+test('statusFromStateFile ignores a file of another Odoo, or garbage', () => {
+    const dest = {id: 'd1', url: 'https://odoo.example.invalid', db: 'base'};
+    const file = (destination, status) =>
+        JSON.stringify({destination, status});
+    const ok = {state: 'ok', pending: 0, lastReport: null, error: null};
+    for (const text of [
+        file({url: 'https://odoo.example.invalid', db: 'other'}, ok),
+        file({url: 'https://other.example.invalid', db: 'base'}, ok),
+        file(undefined, ok),
+        '{', '', null, '[]',
+        file({url: 'https://odoo.example.invalid', db: 'base'},
+            {state: 'party', pending: 0}),
+    ])
+        assert.equal(statusFromStateFile(text, dest), null, String(text));
+    assert.deepEqual(statusFromStateFile(file({url:
+        'https://odoo.example.invalid', db: 'base'}, {state: 'revoked',
+        pending: -2, lastReport: 5, error: 7}), dest),
+    {state: 'revoked', pending: 0, lastReport: null, error: null});
+});
