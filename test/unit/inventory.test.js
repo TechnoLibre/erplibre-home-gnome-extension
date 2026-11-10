@@ -367,19 +367,22 @@ test('EventQueue bound uses the given max', () => {
     assert.equal(q.lost, 1);
 });
 
-test('EventQueue acknowledge subtracts the lost count it reported', () => {
+test('EventQueue lost is a running total that no acknowledge lowers', () => {
     const q = new EventQueue({max: 1});
     q.push(event('a'));
     q.push(event('b'));
     q.push(event('c'));
     assert.equal(q.lost, 2);
-    const body = reportBody({hostname: 'h'}, q);
+    const sent = reportBody({hostname: 'h'}, q);
+    const retried = reportBody({hostname: 'h'}, q);
+    assert.deepEqual(retried, sent);
+    q.acknowledge(['c'], sent.lost_events);
+    assert.deepEqual(q.pending(), []);
+    assert.equal(q.lost, 2);
     q.push(event('d'));
+    q.push(event('e'));
     assert.equal(q.lost, 3);
-    q.acknowledge(['c'], body.lost_events);
-    assert.equal(q.lost, 1);
-    q.acknowledge([], 99);
-    assert.equal(q.lost, 0);
+    assert.equal(reportBody({hostname: 'h'}, q).lost_events, 3);
 });
 
 test('EventQueue prune drops events older than 30 days as lost', () => {
