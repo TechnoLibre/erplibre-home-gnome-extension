@@ -9,8 +9,8 @@ import {fake, makeSettings, settle} from './gjs-fake.js';
 
 const svc = await import('../../lib/inventory-service.js');
 const {InventoryService} = svc;
-const {TIMEOUT_S, HEARTBEAT_S, POLL_S, INVENTORY_PROTOCOL} =
-    await import('../../lib/inventory.js');
+const {TIMEOUT_S, HEARTBEAT_S, POLL_S, INVENTORY_PROTOCOL,
+    QUEUE_MAX_AGE_DAYS} = await import('../../lib/inventory.js');
 const {DeviceIndicator} = await import('../../indicators/device.js');
 
 const TOKEN = 'TOKEN-INVENTED-0123456789abcdefghijklmnopqrs';
@@ -255,6 +255,7 @@ test('two destinations each get their own report and queue', async () => {
     await settle();
     assert.deepEqual(h.calls.map(c => [c.db, c.token]),
         [['base1', TOKEN], ['base2', 'TOKEN-TWO']]);
+    assert.equal(h.factsReads.length, 1, 'one reading for both');
     await reply(0, ok());
     h.usb.emit([DECK_A]);
     await settle();
@@ -262,6 +263,19 @@ test('two destinations each get their own report and queue', async () => {
     assert.equal(h.calls[2].db, 'base1');
     assert.equal(h.service.status('d2').pending, 1);
 });
+
+test('destinations reporting together share one reading in progress',
+    async () => {
+        harness({dests: [D1, D2], tokens: {d1: TOKEN, d2: 'TOKEN-TWO'}});
+        h.factsHang = true;
+        h.usb.emit([]);
+        await settle();
+        assert.equal(h.factsReads.length, 1);
+        const tens = liveMs(TIMEOUT_S * 1000);
+        fire(tens[tens.length - 1]);
+        await settle();
+        assert.equal(h.calls.length, 2);
+    });
 
 // ------------------------------------------------- offline and refused
 
@@ -313,6 +327,27 @@ test('a network error or a 5xx is offline too, and the events wait',
         await reply(2, [503, null]);
         assert.equal(h.service.status('d1').state, 'offline');
         assert.equal(h.service.status('d1').pending, 2);
+    });
+
+test('a report accepted after failures starts the back-off over',
+    async () => {
+        await enrolledAndReported([]);
+        h.usb.emit([DECK_A]);
+        await settle();
+        let i = 1;
+        for (const s of [1, 2, 4]) {
+            await reply(i++, [503, null]);
+            const [retry] = liveMs(svc.RETRY_MIN_S * s * 1000);
+            assert.ok(retry, `retry after ${svc.RETRY_MIN_S * s} s`);
+            fire(retry);
+            await settle();
+        }
+        await reply(i++, ok(['uuid-1']));
+        h.usb.emit([]);
+        await settle();
+        await reply(i++, [503, null]);
+        assert.equal(liveMs(svc.RETRY_MIN_S * 1000).length, 1);
+        assert.equal(liveMs(svc.RETRY_MIN_S * 8 * 1000).length, 0);
     });
 
 test('retryDelayS doubles from RETRY_MIN_S up to the heartbeat', () => {
@@ -586,6 +621,60 @@ test('stop() cancels a reading in progress and its deadline', async () => {
     assert.equal(h.calls.length, 0);
 });
 
+// ----------------------------------------------------- queue bounds
+
+/** The ISO time `days` days after the harness's first `now`. */
+const later = days => new Date(Date.parse('2026-03-01T10:00:00.000Z') +
+    days * 24 * 3600 * 1000).toISOString();
+
+test('a new event drops, as lost, the queued ones past the age bound',
+    async () => {
+        await enrolledAndReported([]);
+        h.usb.emit([DECK_A]);
+        await settle();
+        // The call for uuid-1 stays in flight: only the queuing prunes.
+        h.now = later(QUEUE_MAX_AGE_DAYS + 5);
+        h.usb.emit([]);
+        await settle();
+        assert.equal(h.calls.length, 2);
+        assert.equal(h.service.status('d1').pending, 1);
+        assert.deepEqual(readState().queue.events.map(e => e.uuid),
+            ['uuid-2']);
+        assert.equal(readState().queue.lost, 1);
+    });
+
+test('a report drops, as lost, the queued events past the age bound',
+    async () => {
+        await enrolledAndReported([]);
+        h.usb.emit([DECK_A]);
+        await settle();
+        await reply(1, [0, null]);
+        h.now = later(QUEUE_MAX_AGE_DAYS + 5);
+        fire(liveMs(svc.RETRY_MIN_S * 1000)[0]);
+        await settle();
+        assert.deepEqual(h.calls[2].body.events, []);
+        assert.equal(h.calls[2].body.lost_events, 1);
+        assert.equal(readState().queue.events.length, 0);
+        assert.equal(readState().queue.lost, 1);
+    });
+
+test('the facts are read again for a report once a minute old', async () => {
+    await enrolledAndReported([]);
+    assert.equal(h.factsReads.length, 1);
+    h.facts = {...FACTS, erplibre: {branch: 'main', commit: 'def456'}};
+    h.clockMs = 59 * 1000;
+    fire(liveMs(HEARTBEAT_S * 1000)[0]);
+    await settle();
+    assert.equal(h.factsReads.length, 1, 'one reading serves the minute');
+    assert.equal(h.calls[1].body.state.erplibre.commit, 'abc123');
+    await reply(1, ok());
+    h.clockMs = 61 * 1000;
+    fire(liveMs(HEARTBEAT_S * 1000)[0]);
+    await settle();
+    assert.equal(h.factsReads.length, 2);
+    assert.equal(h.calls[2].body.state.erplibre.commit, 'def456');
+});
+
 // ------------------------------------------------- service and decks
 
 test('a USB watch that cannot start leaves the service reporting no deck',
@@ -780,6 +869,31 @@ test('stop() cancels the call in flight and every timer', async () => {
     assert.equal(h.calls.length, 2);
     h.service.stop();
 });
+
+// The two tests below read the service's own fields: what they check (a
+// listener or a pending report let go) has no other effect to observe.
+
+test('stop() lets go of the listeners', async () => {
+    harness();
+    h.service.connect('changed', () => {});
+    assert.equal(h.service._handlers.size, 1);
+    h.service.stop();
+    assert.equal(h.service._handlers.size, 0);
+});
+
+test('a removed destination ends its report even if the call never does',
+    async () => {
+        harness({dests: [D1, D2], tokens: {d1: TOKEN, d2: 'TOKEN-TWO'}});
+        h.usb.emit([]);
+        await settle();
+        assert.equal(h.calls.length, 2);
+        const rec = h.service._records.get('d2');
+        assert.equal(rec.inFlight, true);
+        h.settings.set_string('inventory-destinations', JSON.stringify([D1]));
+        await settle();
+        // The fake call ignores its cancellable and never answers.
+        assert.equal(rec.inFlight, false);
+    });
 
 // ---------------------------------------------------------- pure parts
 
