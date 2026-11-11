@@ -1756,6 +1756,100 @@ test('a_restart_failure_refuses_restart_failed', async () => {
     assert.match(confText(), /^DECK_PROGRAM=controller$/m);
 });
 
+test('a_refused_restart_stays_pending_when_odoo_sends_it_again',
+    async () => {
+        await piloted();
+        fake.onSpawn = argv => (argv.includes('restart') ? {exit: 1} : {});
+        const rev3 = config(3, {deck_program: 'controller', games: 'off'});
+        await offer(0, rev3);
+        const r = await h.service.applyConfig('d1', 3);
+        assert.equal(r.reason, 'restart_failed');
+        await settle(40);
+        assert.deepEqual(h.calls[1].body.config.result, r);
+        // The file holds the values now; the deck still runs the old ones.
+        await offer(1, rev3);
+        assert.equal(h.calls.length, 2, 'not reported applied');
+        assert.deepEqual(h.service.pendingConfig()?.keys, ['deck_program'],
+            'still waits for another click, games needs no restart');
+        const next = await heartbeat();
+        assert.equal(next.body.config.result, null);
+        assert.equal(next.body.config.revision_applied, null);
+        fake.onSpawn = () => ({});
+        const again = await h.service.applyConfig('d1', 3);
+        assert.equal(again.status, 'applied');
+        assert.equal(restarts().length, 2, 'restarted at the second click');
+    });
+
+test('a_unit_missing_refusal_stays_pending_until_the_unit_runs',
+    async () => {
+        await piloted();
+        h.serviceState = 'absent';
+        await offer(0, config(3, {deck_program: 'controller'}));
+        assert.equal((await h.service.applyConfig('d1', 3)).reason,
+            'unit_missing');
+        await settle(40);
+        await offer(1, config(3, {deck_program: 'controller'}));
+        assert.equal(h.calls.length, 2, 'not reported applied');
+        assert.equal(h.service.pendingConfig()?.revision, 3);
+        assert.equal((await h.service.applyConfig('d1', 3)).reason,
+            'unit_missing', 'still no unit');
+        h.serviceState = 'active';
+        const r = await h.service.applyConfig('d1', 3);
+        assert.equal(r.status, 'applied');
+        assert.deepEqual(restarts(), [RESTART]);
+    });
+
+test('a_restart_still_owed_is_offered_with_the_next_revision', async () => {
+    await piloted();
+    fake.onSpawn = argv => (argv.includes('restart') ? {exit: 1} : {});
+    await offer(0, config(3, {deck_program: 'controller'}));
+    await h.service.applyConfig('d1', 3);
+    await settle(40);
+    // Odoo adopts a free local value: the file holds the next revision.
+    await offer(1, config(4, {deck_program: 'controller', games: 'on'}));
+    assert.equal(h.calls.length, 2, 'not applied silently');
+    assert.deepEqual(h.announced.map(p => [p.revision, p.keys]),
+        [[3, ['deck_program']], [4, ['deck_program']]]);
+    fake.onSpawn = () => ({});
+    assert.equal((await h.service.applyConfig('d1', 4)).status, 'applied');
+    assert.equal(restarts().length, 2);
+    await settle(40);
+    // Nothing owed any more: values the file holds apply silently.
+    await offer(2, config(5, {deck_program: 'controller', games: 'on'}));
+    assert.equal(h.calls.at(-1).body.config.result.revision, 5);
+    assert.equal(restarts().length, 2);
+});
+
+test('a_restart_owed_for_a_key_odoo_no_longer_sets_is_dropped',
+    async () => {
+        await piloted();
+        fake.onSpawn = argv => (argv.includes('restart') ? {exit: 1} : {});
+        await offer(0, config(3, {deck_program: 'controller'}));
+        await h.service.applyConfig('d1', 3);
+        await settle(40);
+        // deck_program is the employee's again; games the file holds.
+        await offer(1, config(4, {games: 'on'}));
+        assert.equal(h.calls.at(-1).body.config.result.revision, 4,
+            'applied silently');
+        assert.equal(h.service.pendingConfig(), null);
+    });
+
+test('a_restart_owed_outlives_a_screen_lock', async () => {
+    await piloted();
+    fake.onSpawn = argv => (argv.includes('restart') ? {exit: 1} : {});
+    await offer(0, config(3, {deck_program: 'controller'}));
+    await h.service.applyConfig('d1', 3);
+    await settle(40);
+    h.service.stop();
+    await settle();
+    harness({pilot: 'd1'});
+    h.usb.emit([DECK_A]);
+    await settle(40);
+    await offer(0, config(3, {deck_program: 'controller'}));
+    assert.equal(h.calls.length, 1, 'not reported applied');
+    assert.deepEqual(h.service.pendingConfig()?.keys, ['deck_program']);
+});
+
 test('an_unchanged_revision_is_applied_silently', async () => {
     await piloted();
     const before = confBytes();

@@ -179,7 +179,8 @@ revision), then rewrites `~/.config/erplibre-home/streamdeck.conf` in one
 atomic replacement, every other line kept, and restarts the deck service
 when it runs and a setting other than the games changed. Odoo receives
 `applied` or the refusal and its reason at once. A revision the file
-already holds is reported applied without a notification.
+already holds is reported applied without a notification, unless its
+restart failed: it then stays offered until a click restarts the service.
 `$XDG_STATE_HOME/erplibre-home/pilot.json` tells ERPLibre's TODO menu
 which settings Odoo locked.
 

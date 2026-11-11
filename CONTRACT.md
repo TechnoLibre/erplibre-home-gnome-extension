@@ -325,7 +325,10 @@ command, no plugin to turn on.
   When a key whose Restart column says yes changed and the deck unit is
   active, it is restarted; `games` alone restarts nothing. A revision
   whose values the file already holds is reported `applied` without a
-  notification nor a restart.
+  notification nor a restart, unless the unit still owes a restart for
+  one of them: after a `restart_failed` or `unit_missing` refusal, the
+  revision stays offered until a click restarts the unit or finds it
+  not running.
 - `result.reason` of a refusal is `invalid:<key>`, `<key>` a wire key
   of the table, `write_failed`, `restart_failed` or `unit_missing` (the
   program changed while no unit is installed: the file is written all

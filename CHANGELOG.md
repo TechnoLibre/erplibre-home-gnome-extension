@@ -17,7 +17,8 @@ migrations that are not auto-applied.
   click rewrites `streamdeck.conf` atomically, restarts the deck unit when
   it runs and a restarting key changed, and reports `applied` or the
   refusal at once; a revision the file holds already is reported applied
-  silently. `pilot.json` names the pilot's locked keys for ERPLibre, the
+  silently, unless the restart it needs failed: it then stays offered
+  for another click. `pilot.json` names the pilot's locked keys for ERPLibre, the
   report carries `state.deck_plugins`, and the GSettings keys
   `inventory-pilot` and `inventory-apply-request` are added.
 - Odoo configuration, pure half (`lib/deck-config.js`): the closed list
