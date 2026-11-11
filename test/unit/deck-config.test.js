@@ -182,6 +182,20 @@ test('a valid reply comes back normalised, unknown keys ignored', () => {
         .locked, []);
 });
 
+test('plugins_off counts its ids once their repeats are dropped', () => {
+    // The rule of Odoo's schema too: the bound is on distinct ids.
+    const sixtyFour = Array.from({length: 64}, (_, i) => `p${i}`);
+    const r = validateConfig(reply({plugins_off: [...sixtyFour, 'p0']}));
+    assert.equal(r.ok, true);
+    assert.deepEqual(r.settings.plugins_off, sixtyFour);
+    assert.deepEqual(CONFIG_KEYS.plugins_off.parse(
+        [...sixtyFour, 'p0'].join(',')), sixtyFour);
+    assert.deepEqual(validateConfig(reply({plugins_off: [...sixtyFour,
+        'p64']})), {ok: false, reason: 'invalid:plugins_off', revision: 3});
+    assert.equal(CONFIG_KEYS.plugins_off.parse(
+        [...sixtyFour, 'p64'].join(',')), null);
+});
+
 test('an_ask_key_outside_the_free_keys_refuses', () => {
     const settings = {deck_program: 'tiler', games: 'off'};
     for (const key of ['session_refresh_sec', 'games']) {
