@@ -1749,6 +1749,69 @@ test('a_write_failure_refuses_write_failed_and_leaves_the_file',
             'still offered, for another click');
     });
 
+test('apply follows a linked streamdeck.conf and renames over its target',
+    async () => {
+        const dots = path.join(fake.env.XDG_CONFIG_HOME, 'dotfiles');
+        fs.mkdirSync(dots, {recursive: true});
+        const target = path.join(dots, 'streamdeck.conf');
+        fs.writeFileSync(target, CONF);
+        fs.chmodSync(target, 0o640);
+        fs.mkdirSync(path.dirname(confPath()), {recursive: true});
+        fs.symlinkSync('../dotfiles/streamdeck.conf', confPath());
+        const ino = fs.statSync(target).ino;
+        await piloted({conf: null});
+        await offer(0, config(3, {deck_program: 'controller'}));
+        assert.equal((await h.service.applyConfig('d1', 3)).status,
+            'applied');
+        assert.equal(fs.readlinkSync(confPath()),
+            '../dotfiles/streamdeck.conf', 'the link is kept');
+        assert.match(fs.readFileSync(target, 'latin1'),
+            /^DECK_PROGRAM=controller$/m);
+        assert.notEqual(fs.statSync(target).ino, ino,
+            'replaced by a rename, not rewritten in place');
+        assert.equal(fs.statSync(target).mode & 0o777, 0o640);
+        assert.deepEqual(fs.readdirSync(dots), ['streamdeck.conf'],
+            'no temporary file left');
+    });
+
+test('apply renames over a conf of several names, never in place',
+    async () => {
+        await piloted();
+        const other = path.join(fake.env.XDG_CONFIG_HOME, 'other.conf');
+        fs.linkSync(confPath(), other);
+        const ino = fs.statSync(confPath()).ino;
+        await offer(0, config(3, {deck_program: 'controller'}));
+        assert.equal((await h.service.applyConfig('d1', 3)).status,
+            'applied');
+        assert.match(confText(), /^DECK_PROGRAM=controller$/m);
+        assert.notEqual(fs.statSync(confPath()).ino, ino);
+        assert.equal(fs.readFileSync(other, 'latin1'), CONF,
+            'the other name keeps the whole former file');
+    });
+
+test('a failed rename leaves the file whole and no temporary file',
+    async () => {
+        await piloted();
+        const before = confBytes();
+        await offer(0, config(3, {deck_program: 'controller'}));
+        fake.moveFails = true;
+        const r = await h.service.applyConfig('d1', 3);
+        assert.equal(r.reason, 'write_failed');
+        await settle(40);
+        assert.deepEqual(confBytes(), before);
+        assert.deepEqual(fs.readdirSync(path.dirname(confPath())),
+            ['streamdeck.conf']);
+    });
+
+test('apply creates a missing streamdeck.conf by a rename too', async () => {
+    await piloted({conf: null});
+    await offer(0, config(3, {deck_program: 'controller'}));
+    assert.equal((await h.service.applyConfig('d1', 3)).status, 'applied');
+    assert.equal(confText(), 'DECK_PROGRAM=controller\n');
+    assert.deepEqual(fs.readdirSync(path.dirname(confPath())),
+        ['streamdeck.conf']);
+});
+
 test('a_restart_failure_refuses_restart_failed', async () => {
     await piloted();
     fake.onSpawn = argv => (argv.includes('restart') ? {exit: 1} : {});

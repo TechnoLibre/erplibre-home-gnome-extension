@@ -14,13 +14,14 @@ migrations that are not auto-applied.
   entry of the device indicator's menu and a button of the preferences;
   nothing is written before the employee's click. At the first pilot
   report Odoo may ask to keep the local settings or use its own. The
-  click rewrites `streamdeck.conf` atomically, restarts the deck unit when
+  click rewrites `streamdeck.conf` atomically (a temporary file renamed
+  over it, a symbolic link followed and kept), restarts the deck unit when
   it runs and a restarting key changed, and reports `applied` or the
   refusal at once; a revision the file holds already is reported applied
   silently, unless the restart it needs failed: it then stays offered
-  for another click. `pilot.json` names the pilot's locked keys for ERPLibre, the
-  report carries `state.deck_plugins`, and the GSettings keys
-  `inventory-pilot` and `inventory-apply-request` are added.
+  for another click. `pilot.json` names the pilot's locked keys for
+  ERPLibre, the report carries `state.deck_plugins`, and the GSettings
+  keys `inventory-pilot` and `inventory-apply-request` are added.
 - Odoo configuration, pure half (`lib/deck-config.js`): the closed list
   of settings an Odoo may set (`deck_program`, `plugins_off`,
   `session_refresh_sec`, `games`), the validation of the `config` of a
