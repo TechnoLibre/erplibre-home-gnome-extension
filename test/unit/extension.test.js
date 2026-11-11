@@ -1,8 +1,9 @@
 import {test, beforeEach, afterEach} from 'node:test';
 import assert from 'node:assert/strict';
-import {existsSync, mkdirSync, readFileSync} from 'node:fs';
+import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {fake, makeSettings, settle, udevDevice} from './gjs-fake.js';
+import {fake, makeSettings, settle, udevDevice, answer}
+    from './gjs-fake.js';
 
 // After gjs-fake.js: extension.js imports gi:// modules statically.
 const {default: ERPLibreHomeExtension} = await import('../../extension.js');
@@ -287,3 +288,136 @@ test('a destination with a token gets a report once enabled', async () => {
     assert.equal(login.cancellable.is_cancelled(), true,
         'disable cancels the call in flight');
 });
+
+// ------------------------------------------------ Odoo configuration
+
+const PILOT_CONF = '# kept\nDECK_PROGRAM=tiler\nDECK_SESSION_REFRESH_SEC=5\n';
+
+function deckConfPath() {
+    return join(fake.env.XDG_CONFIG_HOME, 'erplibre-home', 'streamdeck.conf');
+}
+
+/**
+ * The extension enabled with destination d1 as the pilot, a token for
+ * it and streamdeck.conf holding PILOT_CONF; its first report waits.
+ */
+async function pilotEnabled() {
+    mkdirSync(join(fake.env.XDG_CONFIG_HOME, 'erplibre-home'),
+        {recursive: true});
+    writeFileSync(deckConfPath(), PILOT_CONF);
+    fake.secrets.set('d1', {schema: 'ca.technolibre.erplibre-home.inventory',
+        attrs: {destination: 'd1', url: 'https://odoo.example.invalid',
+            db: 'base1'},
+        password: 'TOKEN-INVENTED'});
+    fake.onSpawn = argv => (argv[0] === 'systemctl' ? {stdout:
+        'LoadState=loaded\nActiveState=active\nSubState=running\n'}
+        : {exit: 1});
+    await enabled({'inventory-destinations': JSON.stringify([{id: 'd1',
+        label: 'Head office', url: 'https://odoo.example.invalid',
+        db: 'base1'}]), 'inventory-pilot': 'd1'});
+    await settle(60);
+}
+
+/** Answers the GET /web/login of the next report; resolves to its POST. */
+async function nextPost() {
+    const login = fake.http.filter(m => m.method === 'GET' &&
+        m.status !== 303).at(-1);
+    assert.ok(login, 'a report is on its way');
+    answer(login, {status: 303});
+    await settle(40);
+    return fake.http.filter(m => m.method === 'POST').at(-1);
+}
+
+/** Answers the next report with `json`; resolves to the body it sent. */
+async function answerReport(json) {
+    const post = await nextPost();
+    answer(post, {status: 200, body: JSON.stringify({protocol: '1.1',
+        accepted: [], heartbeat_s: 900, ...json})});
+    await settle(80);
+    return JSON.parse(post.body);
+}
+
+const HASH = '0123456789abcdef'.repeat(4);
+
+test('the_first_pilot_asks_before_applying', async () => {
+    await pilotEnabled();
+    const sent = await answerReport({config: {revision: 3, hash: HASH,
+        settings: {session_refresh_sec: 2}, locked: [],
+        ask: ['session_refresh_sec']}});
+    assert.equal(sent.config.pilot, true);
+    assert.equal(fake.notifications.length, 1);
+    const [n] = fake.notifications;
+    assert.equal(n.title, 'Stream Deck: keep your settings or use Odoo\'s?');
+    assert.ok(n.body.includes('Head office'));
+    assert.ok(n.body.includes('session_refresh_sec'));
+    assert.deepEqual(n.actions.map(a => a.label),
+        ['Use Odoo\'s settings', 'Keep my settings']);
+    const menu = mounted('device').menu.items.map(i => i.text);
+    assert.ok(menu.includes('Use Odoo\'s settings (rev. 3)'));
+    assert.ok(menu.includes('Keep my settings (rev. 3)'));
+    assert.ok(!menu.some(t => t.startsWith('Apply Stream Deck')));
+    assert.equal(readFileSync(deckConfPath(), 'utf8'), PILOT_CONF,
+        'nothing written before the answer');
+    n.actions[1].cb();
+    await settle(60);
+    assert.equal(readFileSync(deckConfPath(), 'utf8'), PILOT_CONF,
+        'keeping writes nothing');
+    const next = JSON.parse((await nextPost()).body);
+    assert.equal(next.config.choice, 'keep_local');
+    assert.ok(!mounted('device').menu.items.some(i =>
+        i.text === 'Keep my settings (rev. 3)'), 'the question is gone');
+});
+
+test('a new revision is notified once, its Apply action applies it',
+    async () => {
+        await pilotEnabled();
+        await answerReport({config: {revision: 4, hash: HASH,
+            settings: {deck_program: 'controller'}, locked: []}});
+        assert.equal(fake.notifications.length, 1);
+        const [n] = fake.notifications;
+        assert.equal(n.title, 'New Stream Deck configuration — Head office');
+        assert.ok(n.body.includes('deck_program'));
+        assert.deepEqual(n.actions.map(a => a.label), ['Apply']);
+        assert.ok(mounted('device').menu.items.some(i => i.text ===
+            'Apply Stream Deck configuration (rev. 4): deck_program'));
+        n.actions[0].cb();
+        await settle(80);
+        assert.equal(readFileSync(deckConfPath(), 'utf8'),
+            '# kept\nDECK_PROGRAM=controller\nDECK_SESSION_REFRESH_SEC=5\n');
+        assert.ok(fake.spawned.some(s => s.argv.join(' ') ===
+            'systemctl --user restart erplibre-home-streamdeck.service'));
+        assert.equal(fake.notifications.length, 1, 'notified once');
+    });
+
+test('disable withdraws the notification source', async () => {
+    await pilotEnabled();
+    await answerReport({config: {revision: 4, hash: HASH,
+        settings: {deck_program: 'controller'}, locked: []}});
+    const source = fake.notifications[0].source;
+    ext.disable();
+    ext = null;
+    assert.equal(source.destroyed, true);
+});
+
+test('the strings of the deck menu and the notification are translated',
+    () => {
+        const catalog = rel => readFileSync(new URL(`../../${rel}`,
+            import.meta.url), 'utf8');
+        const fr = catalog('po/fr.po');
+        const strings = ['Apply Stream Deck configuration (rev. {n}): {keys}',
+            'Stream Deck: keep your settings or use Odoo\'s? ({keys})',
+            'Use Odoo\'s settings (rev. {n})', 'Keep my settings (rev. {n})',
+            'New Stream Deck configuration — {label}',
+            'Revision {n} changes: {keys}',
+            'Stream Deck: keep your settings or use Odoo\'s?',
+            '{label} sets other values for: {keys}',
+            'Apply', 'Use Odoo\'s settings', 'Keep my settings'];
+        for (const id of strings) {
+            const m = fr.match(new RegExp(`msgid "${id.replace(
+                /[.*+?^${}()|[\]\\]/g, '\\$&')}"\\nmsgstr "(.+)"`));
+            assert.ok(m && m[1] !== id, `fr: ${id}`);
+            for (const other of ['po/en.po', 'po/erplibre-home.pot'])
+                assert.ok(catalog(other).includes(`msgid "${id}"`),
+                    `${other}: ${id}`);
+        }
+    });

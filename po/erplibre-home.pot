@@ -1108,3 +1108,48 @@ msgstr ""
 
 msgid "Other, by URL"
 msgstr ""
+
+msgid "Apply Stream Deck configuration (rev. {n}): {keys}"
+msgstr ""
+
+msgid "Stream Deck: keep your settings or use Odoo's? ({keys})"
+msgstr ""
+
+msgid "Use Odoo's settings (rev. {n})"
+msgstr ""
+
+msgid "Keep my settings (rev. {n})"
+msgstr ""
+
+msgid "Stream Deck: keep your settings or use Odoo's?"
+msgstr ""
+
+msgid "New Stream Deck configuration — {label}"
+msgstr ""
+
+msgid "{label} sets other values for: {keys}"
+msgstr ""
+
+msgid "Revision {n} changes: {keys}"
+msgstr ""
+
+msgid "Use Odoo's settings"
+msgstr ""
+
+msgid "Keep my settings"
+msgstr ""
+
+msgid "Apply"
+msgstr ""
+
+msgid "Pilot"
+msgstr ""
+
+msgid "This Odoo may configure the Stream Deck of this workstation, never without your click. One destination at most."
+msgstr ""
+
+msgid "Odoo asks: keep your settings or use Odoo's? ({keys})"
+msgstr ""
+
+msgid "Stream Deck configuration, revision {n}: {keys}"
+msgstr ""

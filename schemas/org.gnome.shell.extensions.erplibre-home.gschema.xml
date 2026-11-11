@@ -83,6 +83,8 @@
 
     <!-- Inventory -->
     <key name="inventory-destinations" type="s"><default>"[]"</default><summary>Odoo instances that receive the Stream Deck inventory (JSON array: id, label, url, db, source, instanceId); tokens live in the keyring, never here</summary></key>
+    <key name="inventory-pilot" type="s"><default>""</default><summary>Id of the inventory destination whose Odoo configures the Stream Deck, after the employee's click; empty for none</summary></key>
+    <key name="inventory-apply-request" type="s"><default>""</default><summary>Written by the preferences: "&lt;destination id&gt;:&lt;revision&gt;" applies that revision, "&lt;destination id&gt;:&lt;revision&gt;:keep_local" keeps the local values; the extension empties it once read</summary></key>
 
     <!-- Theming -->
     <key name="icon-overrides" type="s"><default>"{}"</default><summary>Per-indicator icon overrides (JSON object)</summary></key>

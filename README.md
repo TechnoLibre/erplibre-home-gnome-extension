@@ -122,6 +122,7 @@ Schema id `org.gnome.shell.extensions.erplibre-home`. Selected keys:
 - `enable-icon-badges` (`b`, default `true`) — show count circles on top-bar icons
 - `enable-claude-state-watch` (`b`, default `true`) — watch Claude session state files for the pencil badge
 - `inventory-destinations` (`s`, JSON array) — the Odoo instances that receive the Stream Deck inventory; no token there, the tokens live in the GNOME keyring
+- `inventory-pilot` (`s`) — the id of the destination whose Odoo configures the Stream Deck, empty for none; `inventory-apply-request` (`s`) — written by the preferences to apply a revision or keep the local values, emptied by the extension
 
 ## Odoo inventory
 
@@ -159,6 +160,28 @@ Shell never waits for Odoo. A deck plugged or unplugged while the
 extension is off (screen locked, session closed) is reported at its next
 start, dated then. The wire protocol is in
 [CONTRACT.md](CONTRACT.md), section « Odoo inventory ».
+
+### Odoo configuration
+
+One destination at most, switched on as **Pilot** in its row, may
+configure the Stream Deck: the deck program, the plugins turned off, the
+session refresh and the games, and nothing else. Its Odoo sends a
+revision in the reply to a report; nothing is written before the
+employee's click. A new revision shows once as a notification with
+**Apply**, as an entry of the device indicator's menu listing the keys
+that change, and as an **Apply** button in the destination's row. At the
+first pilot report Odoo may ask instead: **Use Odoo's settings** applies
+its values, **Keep my settings** writes nothing and Odoo adopts the local
+values; locked settings are then offered with **Apply** as usual.
+
+Applying checks every value first (one outside the list refuses the whole
+revision), then rewrites `~/.config/erplibre-home/streamdeck.conf` in one
+atomic replacement, every other line kept, and restarts the deck service
+when it runs and a setting other than the games changed. Odoo receives
+`applied` or the refusal and its reason at once. A revision the file
+already holds is reported applied without a notification.
+`$XDG_STATE_HOME/erplibre-home/pilot.json` tells ERPLibre's TODO menu
+which settings Odoo locked.
 
 ## Icon badges
 

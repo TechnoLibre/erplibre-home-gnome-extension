@@ -365,9 +365,12 @@ keyring is not taken for a missing token.
 - `$XDG_STATE_HOME/erplibre-home/inventory/<id>.json`, mode 0600, one per
   destination, written by the extension only:
   `{destination: {url, db}, queue: {events, lost}, status: {state,
-  pending, lastReport, error}}`, read back only when it names the
-  destination's URL and database. It never holds a secret; ERPLibre does
-  not read it.
+  pending, lastReport, error}}`, plus `config` once Odoo configured the
+  destination as the pilot: the revision applied, the last configuration
+  received, the revision announced, and the result or the choice the next
+  report carries. It is read back only when it names the destination's
+  URL and database, never holds a secret, and ERPLibre does not read it;
+  the preferences read `config` to offer the revision that waits.
 - `$XDG_STATE_HOME/erplibre-home/inventory-seen.json`, mode 0600, written
   by the extension only: `{decks, service}`, the decks (`serial`,
   `usb_product_id`, `usb_path`) and the deck service state it last saw.

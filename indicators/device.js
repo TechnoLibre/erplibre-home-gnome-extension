@@ -115,12 +115,13 @@ class DeviceIndicator extends PanelMenu.Button {
         this._refresh();
     }
 
-    // Rebuilds the menu when the decks or the inventory line changed: the
-    // service signals every report, and a rebuild under an open menu
-    // closes what the user had open.
+    // Rebuilds the menu when the decks, the inventory line or the pending
+    // configuration changed: the service signals every report, and a
+    // rebuild under an open menu closes what the user had open.
     _refresh() {
         const decks = this._inventory?.decks() ?? [];
-        const shown = JSON.stringify([decks, this._inventoryLine()]);
+        const shown = JSON.stringify([decks, this._inventoryLine(),
+            this._pendingConfig()]);
         if (shown === this._shown) return;
         this._shown = shown;
         this._cache = decks;
@@ -142,6 +143,46 @@ class DeviceIndicator extends PanelMenu.Button {
         return _('Inventory: up to date');
     }
 
+    // The revision of the pilot Odoo waiting on the employee, or null.
+    _pendingConfig() {
+        try {
+            return this._inventory?.pendingConfig?.() ?? null;
+        } catch (_e) {
+            return null;
+        }
+    }
+
+    // The entries of a pending configuration: one that applies it, or, when
+    // Odoo asks at the first pilot report, the question and its two
+    // answers. Nothing is applied but by one of these clicks.
+    _configItems(pending) {
+        const keys = (pending.ask.length ? pending.ask : pending.keys)
+            .join(', ');
+        const item = (text, run) => {
+            const it = new PopupMenu.PopupMenuItem(text);
+            it.connect('activate', () => Promise.resolve(
+                run(pending.destinationId, pending.revision)).catch(e =>
+                console.log(`[ERPLibreHome] inventory config: ${e.message}`)));
+            return it;
+        };
+        const apply = (id, rev) => this._inventory.applyConfig(id, rev);
+        if (!pending.ask.length) {
+            return [item(_('Apply Stream Deck configuration (rev. {n}): {keys}')
+                .replace('{n}', pending.revision).replace('{keys}', keys),
+            apply)];
+        }
+        return [
+            new PopupMenu.PopupMenuItem(
+                _('Stream Deck: keep your settings or use Odoo\'s? ({keys})')
+                    .replace('{keys}', keys), {reactive: false}),
+            item(_('Use Odoo\'s settings (rev. {n})')
+                .replace('{n}', pending.revision), apply),
+            item(_('Keep my settings (rev. {n})')
+                .replace('{n}', pending.revision),
+            (id, rev) => this._inventory.keepLocal(id, rev)),
+        ];
+    }
+
     _rebuildMenu() {
         this.menu.removeAll();
         if (!this._cache.length) {
@@ -155,6 +196,11 @@ class DeviceIndicator extends PanelMenu.Button {
         if (line !== null) {
             this.menu.addMenuItem(new PopupMenu.PopupMenuItem(line,
                 {reactive: false}));
+        }
+        const pending = this._pendingConfig();
+        if (pending !== null) {
+            for (const it of this._configItems(pending))
+                this.menu.addMenuItem(it);
         }
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         const rescan = new PopupMenu.PopupMenuItem(_('🔄 Re-scan USB'));
