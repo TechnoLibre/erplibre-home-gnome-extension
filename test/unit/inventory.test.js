@@ -577,6 +577,11 @@ test('the_body_carries_config_only_for_the_pilot', () => {
     assert.deepEqual(reportBody({hostname: 'h'}, q, config).config,
         {pilot: true, revision_applied: null, current: CURRENT, result: null,
             choice: null});
+    assert.deepEqual(reportBody({hostname: 'h'}, q).config, {pilot: false});
+    assert.equal(Object.hasOwn(reportBody({hostname: 'h'}, q, null),
+        'config'), false, 'a pilot that read no file sends none');
+    assert.deepEqual(settleConfig({result: APPLIED, choice: 'keep_local'},
+        null), {result: APPLIED, choice: 'keep_local'}, 'nothing settled');
 });
 
 test('the pilot body holds only what Odoo accepts', () => {

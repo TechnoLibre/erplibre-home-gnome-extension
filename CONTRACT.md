@@ -277,7 +277,9 @@ route.
   what became of the last revision received, until a report carrying it
   is answered 200.
   `choice` is the employee's answer to an `ask`, sent once, in the
-  report that follows it.
+  report that follows it. A pilot that cannot read `streamdeck.conf`,
+  though it exists, sends no `config` in that report, and Odoo changes
+  nothing of the configuration; the reply's `config` is not taken.
 
 **Odoo configuration.** One destination at most is the pilot: the one
 whose id the GSettings key `inventory-pilot` holds, none by default. Only

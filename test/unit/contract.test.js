@@ -508,6 +508,8 @@ test('the contract states the config shapes of the body and the reply', () => {
         + '`ask`, sent once, in the report that follows it'));
     assert.ok(body.includes('a key the file lacks, or a value outside the '
         + 'table, as null'));
+    assert.ok(body.includes('A pilot that cannot read `streamdeck.conf`, '
+        + 'though it exists, sends no `config` in that report'));
     const reply = item('Odoo inventory', 'Reply `config`');
     const valid = validateConfig({revision: 1, hash: 'a'.repeat(64),
         settings: {games: 'on'}, locked: [], ask: []});

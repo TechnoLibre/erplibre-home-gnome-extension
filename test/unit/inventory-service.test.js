@@ -1663,6 +1663,26 @@ test('an_answer_odoo_settles_without_a_new_revision_is_announced',
         assert.match(confText(), /^DECK_SESSION_REFRESH_SEC=2$/m);
     });
 
+test('an_unreadable_conf_sends_no_pilot_config', async () => {
+    await piloted();
+    await offer(0, config(3, {deck_program: 'controller'}));
+    assert.equal(h.service.pendingConfig().revision, 3);
+    // The file cannot be read: no local value is known, none is sent as
+    // null, and the reply's config, if any, is not taken.
+    fs.rmSync(confPath());
+    fs.mkdirSync(confPath());
+    const blind = await heartbeat();
+    assert.equal(Object.hasOwn(blind.body, 'config'), false);
+    await offer(1, null);
+    assert.equal(h.service.pendingConfig().revision, 3, 'still offered');
+    assert.equal(h.announced.length, 1);
+    fs.rmdirSync(confPath());
+    deckConf(CONF);
+    const next = await heartbeat();
+    assert.equal(next.body.config.pilot, true);
+    assert.equal(next.body.config.current.deck_program, 'tiler');
+});
+
 test('apply_writes_then_restarts_an_active_unit', async () => {
     await piloted();
     fs.chmodSync(confPath(), 0o640);
