@@ -1913,6 +1913,58 @@ test('a value outside the schema refuses the revision once, writes nothing',
         assert.deepEqual(confBytes(), before);
     });
 
+test('refusals decided by replies do not chain reports', async () => {
+    await piloted();
+    await offer(0, config(3, {deck_program: '/bin/sh'}));
+    assert.equal(h.calls.length, 2, 'the first refusal goes at once');
+    await offer(1, config(4, {deck_program: '/bin/sh'}));
+    assert.equal(h.calls.length, 2, 'the next waits for the heartbeat');
+    const next = await heartbeat();
+    assert.deepEqual(next.body.config.result, {revision: 4,
+        status: 'refused', reason: 'invalid:deck_program', at: h.now});
+    await offer(h.calls.indexOf(next), config(5, {deck_program: '/bin/sh'}));
+    assert.equal(h.calls.length, 4, 'after the heartbeat, at once again');
+});
+
+test('silent applications decided by replies do not chain reports',
+    async () => {
+        await piloted();
+        const held = {deck_program: 'tiler', games: 'on'};
+        await offer(0, config(3, held));
+        assert.equal(h.calls.length, 2);
+        await offer(1, config(4, held));
+        assert.equal(h.calls.length, 2, 'the next waits for the heartbeat');
+        const next = await heartbeat();
+        assert.equal(next.body.config.result.revision, 4);
+        assert.equal(next.body.config.revision_applied, 4);
+    });
+
+test('a chained report that decides nothing delays no later result',
+    async () => {
+        await piloted();
+        const bad = config(3, {deck_program: '/bin/sh'});
+        await offer(0, bad);
+        assert.equal(h.calls.length, 2);
+        await offer(1, bad);
+        assert.equal(h.calls.length, 2, 'refused already: nothing decided');
+        const next = await heartbeat();
+        await offer(h.calls.indexOf(next), config(4,
+            {deck_program: '/bin/sh'}));
+        assert.equal(h.calls.length, 4, 'a heartbeat reply reports at once');
+    });
+
+test('a click still reports at once after a reply-decided result',
+    async () => {
+        await piloted();
+        await offer(0, config(3, {deck_program: 'tiler', games: 'on'}));
+        await offer(1, config(4, {games: 'off'}));
+        assert.equal(h.calls.length, 2);
+        await h.service.applyConfig('d1', 4);
+        await settle(40);
+        assert.equal(h.calls.length, 3, 'a click is not chained');
+        assert.equal(h.calls[2].body.config.result.revision, 4);
+    });
+
 test('a reply without config withdraws the offer and the pilot file',
     async () => {
         await piloted();
