@@ -1,0 +1,19 @@
+{
+  "settings": {
+    "plugins_off": [
+      "sound",
+      "timers"
+    ],
+    "session_refresh_sec": 2
+  },
+  "lines": {
+    "DECK_PLUGINS_OFF": "sound,timers",
+    "DECK_SESSION_REFRESH_SEC": "2"
+  },
+  "current": {
+    "deck_program": null,
+    "plugins_off": [],
+    "session_refresh_sec": 5,
+    "games": null
+  }
+}

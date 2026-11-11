@@ -1,0 +1,19 @@
+{
+  "settings": {
+    "deck_program": "controller",
+    "games": "on"
+  },
+  "lines": {
+    "DECK_PROGRAM": "controller",
+    "GAMES": "on"
+  },
+  "current": {
+    "deck_program": "tiler",
+    "plugins_off": [
+      "sound",
+      "timers"
+    ],
+    "session_refresh_sec": 1,
+    "games": null
+  }
+}

@@ -225,7 +225,7 @@ test('enrolling sends the fingerprint and stores the token in the keyring',
         assert.equal(post.headers.Authorization, undefined);
         const fingerprint = createHmac('sha256', `1234|${URL_}|base`)
             .update(MACHINE_ID).digest('hex');
-        assert.deepEqual(JSON.parse(post.body), {protocol: '1.0',
+        assert.deepEqual(JSON.parse(post.body), {protocol: '1.1',
             method: 'pairing_code', fingerprint, hostname: 'deckhost',
             code: 'ABCDEFGH'});
         const [item] = keyring();
@@ -415,7 +415,7 @@ test('unenrolling revokes the token in Odoo, then forgets it', async () => {
     assert.deepEqual(await p, {ok: true, revoked: true, error: null});
     assert.equal(post.uri, `${URL_}${UNENROLL_PATH}`);
     assert.equal(post.headers.Authorization, `Bearer ${TOKEN}`);
-    assert.deepEqual(JSON.parse(post.body), {protocol: '1.0'});
+    assert.deepEqual(JSON.parse(post.body), {protocol: '1.1'});
     assert.equal(keyring().length, 0);
 });
 

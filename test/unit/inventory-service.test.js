@@ -172,9 +172,11 @@ test('the first scan sends the full state, without events', async () => {
                 {serial: null, usb_product_id: '006d', usb_path: '1-4.1',
                     firmware: null},
             ],
+            deck_plugins: [],
         },
         events: [],
         lost_events: 0,
+        config: {pilot: false},
     });
     await reply(0, ok());
     assert.deepEqual(h.service.status('d1'), {state: 'ok', pending: 0,

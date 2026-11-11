@@ -6,7 +6,8 @@ import {
     INVENTORY_PROTOCOL, HEARTBEAT_S, POLL_S, TIMEOUT_S, QUEUE_MAX,
     QUEUE_MAX_AGE_DAYS, urlAllowed, workstationFingerprint, parseOsRelease,
     buildState, deckKey, diffDecks, serviceChanged, EventQueue, reportBody,
-    parseReply, parseDestinations, serializeDestinations,
+    parseReply, parseDestinations, serializeDestinations, configBody,
+    settleConfig,
 } from '../../lib/inventory.js';
 
 const hmac = (key, msg) =>
@@ -25,7 +26,7 @@ function event(uuid, at = '2026-01-10T12:00:00.000Z', kind = 'plugged') {
 // --- constants and module shape ---
 
 test('inventory constants follow the wire contract', () => {
-    assert.equal(INVENTORY_PROTOCOL, '1.0');
+    assert.equal(INVENTORY_PROTOCOL, '1.1');
     assert.equal(HEARTBEAT_S, 900);
     assert.equal(POLL_S, 10);
     assert.equal(TIMEOUT_S, 10);
@@ -40,7 +41,12 @@ test('inventory.js runs under GJS: no gi import, no WHATWG URL, no crypto',
         assert.doesNotMatch(src, /gi:\/\//);
         assert.doesNotMatch(src, /\bnew URL\b|\bURL\s*\(/);
         assert.doesNotMatch(src, /\bcrypto\.|randomUUID/);
-        assert.doesNotMatch(src, /^\s*import\b|\bimport\s*\(/m);
+        // Its one import is the pure configuration module, which imports
+        // nothing (deck-config.test.js holds it to that).
+        const imports = [...src.matchAll(/^\s*import\b[^;]*;/gm)]
+            .map(m => m[0].match(/from '([^']+)'/)?.[1]);
+        assert.deepEqual(imports, ['./deck-config.js']);
+        assert.doesNotMatch(src, /\bimport\s*\(/);
     });
 
 // --- urlAllowed ---
@@ -201,9 +207,10 @@ test('parseOsRelease falls back to VERSION, then null', () => {
 test('buildState produces the wire state', () => {
     const state = buildState({
         hostname: 'ws-invented', os: {name: 'Invented', version: '13'},
-        gnomeShell: '48.2', extensionVersion: '1', contractVersion: '1.2',
+        gnomeShell: '48.2', extensionVersion: '1', contractVersion: '1.3',
         erplibre: {branch: 'main', commit: 'abc123'},
         deckProgram: 'invented_program', serviceState: 'active',
+        deckPlugins: ['timers', 'sound'],
         decks: [
             {serial: 'SN-INVENTED-1', usb_product_id: '0084',
                 usb_path: '1-2.3', firmware: '1.0.0'},
@@ -213,9 +220,10 @@ test('buildState produces the wire state', () => {
     });
     assert.deepEqual(state, {
         hostname: 'ws-invented', os: {name: 'Invented', version: '13'},
-        gnome_shell: '48.2', extension_version: '1', contract_version: '1.2',
+        gnome_shell: '48.2', extension_version: '1', contract_version: '1.3',
         erplibre: {branch: 'main', commit: 'abc123'},
         deck_program: 'invented_program', service_state: 'active',
+        deck_plugins: ['sound', 'timers'],
         decks: [
             {serial: 'SN-INVENTED-1', usb_product_id: '0084',
                 usb_path: '1-2.3', firmware: '1.0.0'},
@@ -319,6 +327,7 @@ test('buildState: missing parts become null, no checkout is null', () => {
         hostname: 'h', os: {name: null, version: null}, gnome_shell: null,
         extension_version: null, contract_version: null, erplibre: null,
         deck_program: null, service_state: 'absent', decks: [],
+        deck_plugins: [],
     });
     assert.equal(buildState({hostname: 'h', serviceState: 'inactive',
         erplibre: {branch: '', commit: ''}}).erplibre, null);
@@ -331,6 +340,19 @@ test('buildState: a checkout with only a branch or a commit is kept', () => {
         {branch: 'main', commit: null});
     assert.deepEqual(state({commit: 'abc123'}),
         {branch: null, commit: 'abc123'});
+});
+
+test('the deck plugins go sorted, once each, within Odoo\'s bounds', () => {
+    const plugins = deckPlugins => buildState({hostname: 'h',
+        serviceState: 'active', deckPlugins}).deck_plugins;
+    assert.deepEqual(plugins(['b', 'a', 'b', 'A', 'a-b', '_x', 1, null,
+        `a${'b'.repeat(64)}`]), ['a', 'b']);
+    const many = Array.from({length: 200}, (_, i) => `p${String(i)
+        .padStart(3, '0')}`);
+    const sent = plugins(many);
+    assert.equal(sent.length, 128);
+    assert.deepEqual(sent, many.slice(0, 128));
+    assert.deepEqual(plugins('sound'), []);
 });
 
 test('buildState refuses a service state outside the contract', () => {
@@ -532,17 +554,103 @@ test('reportBody carries protocol, state, pending events and lost count',
         q.push(event('a'));
         q.push(event('b'));
         const state = {hostname: 'h'};
-        assert.deepEqual(reportBody(state, q), {protocol: '1.0', state,
-            events: [event('b')], lost_events: 1});
+        assert.deepEqual(reportBody(state, q), {protocol: '1.1', state,
+            events: [event('b')], lost_events: 1, config: {pilot: false}});
     });
+
+const CURRENT = {deck_program: 'tiler', plugins_off: ['sound'],
+    session_refresh_sec: 5, games: 'on'};
+const APPLIED = {revision: 4, status: 'applied', reason: null,
+    at: '2026-01-10T12:00:00.000Z'};
+
+test('the_body_carries_config_only_for_the_pilot', () => {
+    for (const pilot of [false, undefined, null, 'yes'])
+        assert.deepEqual(configBody({pilot, revisionApplied: 4,
+            current: CURRENT, result: APPLIED, choice: 'keep_local'}),
+        {pilot: false}, String(pilot));
+    assert.deepEqual(configBody({pilot: true, revisionApplied: 4,
+        current: CURRENT, result: APPLIED, choice: null}),
+    {pilot: true, revision_applied: 4, current: CURRENT, result: APPLIED,
+        choice: null});
+    const q = new EventQueue();
+    const config = configBody({pilot: true, current: CURRENT});
+    assert.deepEqual(reportBody({hostname: 'h'}, q, config).config,
+        {pilot: true, revision_applied: null, current: CURRENT, result: null,
+            choice: null});
+});
+
+test('the pilot body holds only what Odoo accepts', () => {
+    const body = configBody({pilot: true, revisionApplied: -1,
+        current: {deck_program: '/bin/sh', plugins_off: ['Sound'],
+            games: 'off', key_layouts: {}, session_refresh_sec: '2'},
+        result: {revision: 2, status: 'refused',
+            reason: `write_failed${'\u{1F600}'.repeat(300)}`, at: 'now',
+            extra: 1},
+        choice: 'later'});
+    assert.deepEqual(body.current, {deck_program: null, plugins_off: null,
+        session_refresh_sec: null, games: 'off'});
+    assert.equal(body.revision_applied, null);
+    assert.equal(body.choice, null);
+    assert.deepEqual(Object.keys(body.result),
+        ['revision', 'status', 'reason', 'at']);
+    assert.equal(Array.from(body.result.reason).length, 256);
+    for (const result of [{...APPLIED, status: 'done'},
+        {...APPLIED, revision: 'x'}, {...APPLIED, at: null}, 'applied'])
+        assert.equal(configBody({pilot: true, current: CURRENT, result})
+            .result, null, JSON.stringify(result));
+    assert.equal(configBody({pilot: true, current: CURRENT,
+        result: {...APPLIED, reason: 'ignored'}}).result.reason, null,
+    'an applied result carries no reason');
+    assert.deepEqual(configBody({pilot: true}).current,
+        {deck_program: null, plugins_off: null, session_refresh_sec: null,
+            games: null});
+});
+
+test('the_body_carries_the_choice_once', () => {
+    const pending = {result: APPLIED, choice: 'keep_local'};
+    const sent = configBody({pilot: true, current: CURRENT, ...pending});
+    assert.equal(sent.choice, 'keep_local');
+    // The 200 of that report settles what it carried.
+    const after = settleConfig(pending, sent);
+    assert.deepEqual(after, {result: null, choice: null});
+    assert.equal(configBody({pilot: true, current: CURRENT, ...after})
+        .choice, null);
+    // What changed since the body was built waits for the next report.
+    const newer = {result: {...APPLIED, revision: 5}, choice: 'take_odoo'};
+    assert.deepEqual(settleConfig(newer, sent), newer);
+    // A report without config, or a non-pilot one, settles nothing.
+    assert.deepEqual(settleConfig(pending, {pilot: false}), pending);
+    assert.deepEqual(settleConfig(pending, undefined), pending);
+});
 
 test('parseReply accepts a 200 with accepted uuids', () => {
     assert.deepEqual(
-        parseReply(200, {protocol: '1.0', accepted: ['a', 'b'],
+        parseReply(200, {protocol: '1.1', accepted: ['a', 'b'],
             heartbeat_s: 600}),
-        {ok: true, accepted: ['a', 'b'], heartbeatS: 600, error: null});
+        {ok: true, accepted: ['a', 'b'], heartbeatS: 600, error: null,
+            config: null});
     assert.deepEqual(parseReply(200, {protocol: '1.0', accepted: []}),
-        {ok: true, accepted: [], heartbeatS: 900, error: null});
+        {ok: true, accepted: [], heartbeatS: 900, error: null, config: null});
+});
+
+test('parseReply validates the config a reply carries', () => {
+    const config = {revision: 2, hash: 'b'.repeat(64),
+        settings: {games: 'off', deck_program: 'controller'},
+        locked: ['games'], ask: ['deck_program']};
+    assert.deepEqual(parseReply(200, {accepted: [], config}).config,
+        {ok: true, revision: 2, hash: 'b'.repeat(64),
+            settings: {deck_program: 'controller', games: 'off'},
+            locked: ['games'], ask: ['deck_program']});
+    // A bad config refuses the revision, never the report: its events
+    // stay acknowledged.
+    const bad = parseReply(200, {accepted: ['a'],
+        config: {...config, settings: {deck_program: '/bin/sh'}}});
+    assert.deepEqual(bad, {ok: true, accepted: ['a'], heartbeatS: 900,
+        error: null, config: {ok: false, reason: 'invalid:deck_program',
+            revision: 2}});
+    assert.equal(parseReply(200, {accepted: [], config: null}).config, null);
+    assert.equal(parseReply(401, {error: 'token_invalid', config}).config,
+        null);
 });
 
 test('parseReply bounds the heartbeat between a minute and a day', () => {
@@ -563,7 +671,8 @@ test('parseReply maps the contract error codes', () => {
         [400, 'protocol_unsupported'], [401, 'credentials_refused'],
         [401, 'token_invalid'], [403, 'user_inactive']]) {
         assert.deepEqual(parseReply(status, {protocol: '1.0', error: code}),
-            {ok: false, accepted: [], heartbeatS: 900, error: code});
+            {ok: false, accepted: [], heartbeatS: 900, error: code,
+                config: null});
     }
 });
 
@@ -582,7 +691,8 @@ test('parseReply: an answer outside the contract is bad_reply', () => {
         [401, {error: 'nope'}], [400, 'text'], [302, null],
         [201, {accepted: ['a']}], [204, {accepted: []}]]) {
         assert.deepEqual(parseReply(status, json),
-            {ok: false, accepted: [], heartbeatS: 900, error: 'bad_reply'},
+            {ok: false, accepted: [], heartbeatS: 900, error: 'bad_reply',
+                config: null},
             `${status} ${JSON.stringify(json)}`);
     }
 });
@@ -751,14 +861,14 @@ test('checkDestination keeps a label short and on one line', () => {
 test('enrollBody builds the body of each method, protocol first', () => {
     const facts = {fingerprint: FP, hostname: 'deckhost'};
     assert.deepEqual(enrollBody({method: 'pairing_code', code: ' abcd-efgh '},
-        facts), {ok: true, error: null, body: {protocol: '1.0',
+        facts), {ok: true, error: null, body: {protocol: '1.1',
         method: 'pairing_code', fingerprint: FP, hostname: 'deckhost',
         code: 'ABCDEFGH'}});
     assert.deepEqual(enrollBody({method: 'api_key', key: ' KEY-INVENTED '},
-        facts).body, {protocol: '1.0', method: 'api_key', fingerprint: FP,
+        facts).body, {protocol: '1.1', method: 'api_key', fingerprint: FP,
         hostname: 'deckhost', key: 'KEY-INVENTED'});
     assert.deepEqual(enrollBody({method: 'password', login: ' someone ',
-        password: ' pw invented '}, facts).body, {protocol: '1.0',
+        password: ' pw invented '}, facts).body, {protocol: '1.1',
         method: 'password', fingerprint: FP, hostname: 'deckhost',
         login: 'someone', password: ' pw invented '});
 });

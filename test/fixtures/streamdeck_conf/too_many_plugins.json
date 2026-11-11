@@ -1,0 +1,16 @@
+{
+  "settings": {
+    "plugins_off": [
+      "p1"
+    ]
+  },
+  "lines": {
+    "DECK_PLUGINS_OFF": "p1"
+  },
+  "current": {
+    "deck_program": "tiler",
+    "plugins_off": null,
+    "session_refresh_sec": 60,
+    "games": "on"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "settings": {
+    "games": "off",
+    "session_refresh_sec": 0.5,
+    "plugins_off": [],
+    "deck_program": "none"
+  },
+  "lines": {
+    "DECK_PROGRAM": "none",
+    "DECK_PLUGINS_OFF": "",
+    "DECK_SESSION_REFRESH_SEC": "0.5",
+    "GAMES": "off"
+  },
+  "current": {
+    "deck_program": "tiler",
+    "plugins_off": [],
+    "session_refresh_sec": 1,
+    "games": "on"
+  }
+}
