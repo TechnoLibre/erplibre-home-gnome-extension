@@ -1,6 +1,6 @@
 # Contract between the extension and ERPLibre
 
-**Contract version: 1.2**
+**Contract version: 1.3**
 
 The extension runs on its own (see `README.md`). ERPLibre also clones this
 repository at `script/gnome-extension/erplibre_home/`, by Google Repo or by
@@ -132,6 +132,20 @@ check it.
    session journal once enabled, and
    `[ERPLibreHome] mount <id> failed: <reason>` when indicator `<id>`
    fails to start; ERPLibre's long test reads these lines.
+8. **Odoo pilot.** `$XDG_STATE_HOME/erplibre-home/pilot.json`, mode 0600,
+   written by the extension only, holds the configuration an Odoo pilots
+   (see [Odoo inventory](#odoo-inventory)): `{"destination": <label>,
+   "revision": <integer>, "locked": [<wire key>]}`, and never a secret.
+   ERPLibre reads it only to warn, in its TODO menu, before it changes a
+   key of `locked`. A missing file, or one that does not parse, means that
+   no Odoo pilots the workstation.
+9. **Shared fixtures.** `test/fixtures/streamdeck_conf/` holds, for each
+   case `<name>`: `<name>.in.conf`, a `streamdeck.conf` before; `<name>.json`
+   with `settings` (wire values), `lines` (the value each of them gives
+   its `KEY=` line, in the order a missing line is added) and `current`
+   (what the extension reads in `<name>.in.conf`); `<name>.out.conf`, the
+   bytes once `lines` are written. ERPLibre's writer of `streamdeck.conf`
+   gives the same bytes from the same input.
 
 ## What the extension relies on
 
@@ -156,7 +170,16 @@ check it.
      `DECK_PROGRAM=` names the deck program (`tiler` without one), which
      the inventory reports; the inventory reads the state of the unit
      with `systemctl --user show` (`LoadState`, `ActiveState`,
-     `SubState`).
+     `SubState`). The lines `DECK_PLUGINS_OFF=`,
+     `DECK_SESSION_REFRESH_SEC=` and `GAMES=` are read as
+     `script/install/erplibre_home_settings.sh` reads them, byte by byte;
+     the extension writes the keys of the configuration an Odoo pilots
+     into this file, then restarts the unit with
+     `systemctl --user restart`;
+   - deck plugins are the `*.py` files, not starting with `_`, of
+     `script/stream_deck/erplibre_streamdeck/plugins/` and of
+     `$XDG_CONFIG_HOME/erplibre-home/deck-plugins/`, named by the file
+     without `.py`.
 3. **Games gallery:** `script/stream_deck/games/gallery_server.py`, run by
    the Stream Deck venv's python, serves `http://localhost:8042` with
    `GET /api/games` and `GET /launch/<id>` (header
@@ -182,7 +205,7 @@ check it.
 The extension reports the Stream Decks of the workstation, and the state
 of its deck service, to each Odoo instance of the GSettings key
 `inventory-destinations`. The wire format has its own version,
-`"protocol": "1.0"` in every body and every reply, apart from this
+`"protocol": "1.1"` in every body and every reply, apart from this
 contract's: Odoo answers an unknown MAJOR with 400
 `protocol_unsupported`, accepts a newer MINOR and ignores the keys it does
 not know.
@@ -208,9 +231,10 @@ route.
   The same user and fingerprint enrolling again keep their workstation,
   whose token is replaced.
 - `POST /streamdeck/v1/report`: header `Authorization: Bearer <token>`,
-  body `protocol`, `state`, `events`, `lost_events`. Reply 200:
+  body `protocol`, `state`, `events`, `lost_events`, `config`. Reply 200:
   `accepted`, the uuids of the events stored or already known, and
-  `heartbeat_s`. Errors: 401 `token_invalid` (unknown or revoked token),
+  `heartbeat_s`; `config` for the pilot of a workstation that a layer
+  configures. Errors: 401 `token_invalid` (unknown or revoked token),
   403 `user_inactive`, 400 `bad_request` or `protocol_unsupported`.
 - `POST /streamdeck/v1/unenroll`: the same header, body `protocol`;
   reply 200 once the token is revoked.
@@ -221,7 +245,9 @@ route.
   `extension_version`; `contract_version`, this file's version;
   `erplibre`, the `branch` and `commit` of the checkout, or null outside
   one; `deck_program`; `service_state`, one of `active`, `failed`,
-  `inactive`, `absent`; `decks`, the decks connected now, each with
+  `inactive`, `absent`; `deck_plugins`, the ids of the deck plugins found
+  on disk, sorted, at most 128 of the pattern `[a-z][a-z0-9_]{0,63}`
+  (`[]` outside a checkout); `decks`, the decks connected now, each with
   `serial`, `usb_product_id` (4 lowercase hex digits), `usb_path` and
   `firmware`. Unknown values are null, and so is a serial outside
   `[A-Za-z0-9._-]{1,64}` or a `usb_product_id` of another form, which
@@ -239,6 +265,80 @@ route.
   duplicates nothing.
 - `lost_events`: the running total of events the destination's queue
   dropped unsent; Odoo keeps the largest total it received.
+- `config`: `{"pilot": false}` from a destination that is not the
+  pilot; from the pilot, `{"pilot": true, "revision_applied": <integer>
+  or null, "current": {<key>: <value> or null}, "result": <result> or
+  null, "choice": "keep_local", "take_odoo" or null}`, where `<result>`
+  is `{"revision": <integer>, "status": "applied" or "refused",
+  "reason": <text> or null, "at": <ISO 8601>}`. `current` holds every
+  key of the table of **Odoo configuration** below as the file gives it:
+  a key the file lacks, or a value outside the table, as null, which
+  holds nothing local to keep (the deck runs its default). `result` says
+  what became of the last revision received, until a report carrying it
+  is answered 200.
+  `choice` is the employee's answer to an `ask`, sent once, in the
+  report that follows it. A pilot that cannot read `streamdeck.conf`,
+  though it exists, sends no `config` in that report, and Odoo changes
+  nothing of the configuration; the reply's `config` is not taken.
+
+**Odoo configuration.** One destination at most is the pilot: the one
+whose id the GSettings key `inventory-pilot` holds, none by default. Only
+its replies' `config` is ever announced or applied; the others get
+`{"pilot": false}` and give nothing back. Odoo can set these keys of
+`streamdeck.conf`, and nothing else: no path, no environment variable, no
+command, no plugin to turn on.
+
+| Wire key | `streamdeck.conf` line | Values | Restart |
+|---|---|---|---|
+| `deck_program` | `DECK_PROGRAM` | `tiler`, `controller`, `none` | yes |
+| `plugins_off` | `DECK_PLUGINS_OFF` | a list of at most 64 ids `[a-z][a-z0-9_]{0,63}`, written joined by `,` | yes |
+| `session_refresh_sec` | `DECK_SESSION_REFRESH_SEC` | a number from 0.5 to 60 | yes |
+| `games` | `GAMES` | `on`, `off` | no |
+
+- Reply `config`: `{"revision": <integer>, "hash": <64 lowercase hex>,
+  "settings": {<key>: <value>}, "locked": [<key>], "ask": [<key>]}`.
+  `settings` are Odoo's values of the keys a layer sets; `locked` the
+  keys the manager locked; `ask`, omitted when empty, the free keys
+  whose local value Odoo asks the employee to keep or replace. A key of
+  `locked` outside `settings`, or of `ask` outside `settings` or in
+  `locked`, refuses the revision with `invalid:<key>`; a key unknown to
+  this table is ignored. A `config` of another shape is ignored, as if
+  absent: nothing is announced, written or reported, since no key of
+  the table is at fault (`revision` not a non-negative integer, `hash`
+  not 64 lowercase hex digits, `settings` not an object, `locked` or
+  `ask` not a list of texts).
+- First pilot: at the first pilot report of a workstation, Odoo lists in
+  `ask` the free keys whose local value is not null and differs from its
+  own, unless the organisation forces the choice; the extension asks the
+  employee to keep their settings or use Odoo's, and sends the answer as
+  `choice`. « Keep my settings » writes nothing. The revision answered
+  that way comes back without `ask` when Odoo adopted nothing, and is
+  then announced again for what it still offers. Locked keys are offered
+  for the usual confirmation in every case.
+- Nothing is applied without the employee's click: a notification, an
+  entry of the deck menu and a button of the preferences announce each
+  revision once; the preferences ask the service through the GSettings key
+  `inventory-apply-request`, `"<destination id>:<revision>"` to apply, or
+  `"<destination id>:<revision>:keep_local"` to keep the local values.
+- Applying validates every value of the revision first: one outside the
+  table refuses the whole revision with `invalid:<key>`, and nothing is
+  written. Otherwise the file is read again and rewritten in one atomic
+  replacement: every line `<KEY>=` of a key of `settings` takes its value,
+  a missing key is added at the end in the order of the table, every
+  other line stays byte for byte, and the file ends with a newline.
+  When a key whose Restart column says yes changed and the deck unit is
+  active, it is restarted; `games` alone restarts nothing. A revision
+  whose values the file already holds is reported `applied` without a
+  notification nor a restart, unless the unit still owes a restart for
+  one of them: after a `restart_failed` or `unit_missing` refusal, the
+  revision stays offered until a click restarts the unit or finds it
+  not running.
+- `result.reason` of a refusal is `invalid:<key>`, `<key>` a wire key
+  of the table, `write_failed`, `restart_failed` or `unit_missing` (the
+  program changed while no unit is installed: the file is written all
+  the same), at most 256 characters, and nothing else.
+- `pilot.json` (item 8 of What ERPLibre relies on) names the pilot's
+  label, the revision received last and its `locked` keys.
 
 **Timing.** A report goes at the first USB scan, at each change, and
 every 900 s otherwise, or every `heartbeat_s` of the last reply; one at a
@@ -272,9 +372,12 @@ keyring is not taken for a missing token.
 - `$XDG_STATE_HOME/erplibre-home/inventory/<id>.json`, mode 0600, one per
   destination, written by the extension only:
   `{destination: {url, db}, queue: {events, lost}, status: {state,
-  pending, lastReport, error}}`, read back only when it names the
-  destination's URL and database. It never holds a secret; ERPLibre does
-  not read it.
+  pending, lastReport, error}}`, plus `config` once Odoo configured the
+  destination as the pilot: the revision applied, the last configuration
+  received, the revision announced, and the result or the choice the next
+  report carries. It is read back only when it names the destination's
+  URL and database, never holds a secret, and ERPLibre does not read it;
+  the preferences read `config` to offer the revision that waits.
 - `$XDG_STATE_HOME/erplibre-home/inventory-seen.json`, mode 0600, written
   by the extension only: `{decks, service}`, the decks (`serial`,
   `usb_product_id`, `usb_path`) and the deck service state it last saw.
@@ -295,6 +398,12 @@ ERPLibre follows `main`: a MAJOR change is pushed on both sides together.
 The wire of the Odoo inventory is versioned by its `protocol` the same
 way, MAJOR for what Odoo can see, MINOR for an optional addition; this
 file's version moves with it.
+
+- **1.3:** the Odoo configuration, protocol 1.1: the report carries
+  `config` and `state.deck_plugins`, the pilot destination receives a
+  `config` it applies to `streamdeck.conf` after the employee's click;
+  `pilot.json` and the fixtures of `streamdeck.conf` are shared with
+  ERPLibre.
 
 - **1.2:** the Odoo inventory: the extension enrolls with and reports to
   the routes of the Odoo module `erplibre_streamdeck`, and reads

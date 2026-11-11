@@ -38,9 +38,11 @@ afterEach(() => {
  * A service on fakes. `h.calls` holds each Odoo call {url, db, path, body,
  * token, cancellable, reply(status, json)}; `h.usb.emit(decks)` is a scan.
  */
-function harness({dests = [D1], tokens = {d1: TOKEN}, start = true} = {}) {
+function harness({dests = [D1], tokens = {d1: TOKEN}, start = true,
+    pilot = null} = {}) {
     const settings = makeSettings({
-        'inventory-destinations': JSON.stringify(dests)});
+        'inventory-destinations': JSON.stringify(dests),
+        ...pilot === null ? {} : {'inventory-pilot': pilot}});
     // A token given as a string was issued for the destination of that id
     // in `dests` (or D1, D2); `{token, url, db}` names where it was issued.
     const issued = Object.fromEntries([D1, D2, ...dests].map(d =>
@@ -88,8 +90,11 @@ function harness({dests = [D1], tokens = {d1: TOKEN}, start = true} = {}) {
             return h.factsHang ? new Promise(() => {})
                 : Promise.resolve({...h.facts});
         },
-        readServiceState: cancellable => {
+        // `h.serviceUnreadable`: systemctl failed, the caller's
+        // `unreadable` comes back, as from the real reading.
+        readServiceState: (cancellable, unreadable = 'absent') => {
             h.serviceReads.push(cancellable);
+            if (h.serviceUnreadable) return Promise.resolve(unreadable);
             return h.serviceHang ? new Promise(() => {})
                 : Promise.resolve(h.serviceState);
         },
@@ -172,9 +177,11 @@ test('the first scan sends the full state, without events', async () => {
                 {serial: null, usb_product_id: '006d', usb_path: '1-4.1',
                     firmware: null},
             ],
+            deck_plugins: [],
         },
         events: [],
         lost_events: 0,
+        config: {pilot: false},
     });
     await reply(0, ok());
     assert.deepEqual(h.service.status('d1'), {state: 'ok', pending: 0,
@@ -1114,12 +1121,23 @@ test('inventorySummary gives the line the deck menu shows', () => {
 
 // ------------------------------------------------------ device indicator
 
-function fakeInventory(decks = [], statuses = []) {
+function fakeInventory(decks = [], statuses = [], pending = null) {
     const handlers = new Map();
     let next = 0;
     return {
         decks: () => decks.map(d => ({...d})),
         statuses: () => statuses.map(s => ({...s})),
+        pendingConfig: () => (pending ? {...pending} : null),
+        clicks: [],
+        applyConfig(id, rev) {
+            this.clicks.push(['apply', id, rev]);
+            return Promise.resolve(null);
+        },
+        keepLocal(id, rev) {
+            this.clicks.push(['keep', id, rev]);
+            return Promise.resolve(true);
+        },
+        setPending(p) { pending = p; },
         connect: (sig, cb) => { handlers.set(++next, cb); return next; },
         disconnect: id => handlers.delete(id),
         rescan() { this.rescans = (this.rescans ?? 0) + 1; },
@@ -1187,6 +1205,42 @@ test('the deck menu shows the inventory status line', async () => {
     }
 });
 
+test('the deck menu offers a pending configuration, applied on a click',
+    async () => {
+        const inv = fakeInventory([], [{state: 'ok', pending: 0}],
+            {destinationId: 'd1', label: 'Odoo one', revision: 3,
+                keys: ['deck_program', 'games'], ask: []});
+        const ind = indicator(inv);
+        const entry = 'Apply Stream Deck configuration (rev. 3): '
+            + 'deck_program, games';
+        assert.ok(labels(ind).includes(entry));
+        assert.deepEqual(inv.clicks, [], 'nothing before the click');
+        ind.menu.items.find(i => i.text === entry).activate();
+        assert.deepEqual(inv.clicks, [['apply', 'd1', 3]]);
+        inv.setPending(null);
+        inv.emit();
+        assert.ok(!labels(ind).some(t => t.startsWith('Apply Stream Deck')),
+            'gone once nothing is pending');
+        ind.destroy();
+    });
+
+test('the deck menu asks the first-pilot question with two entries', () => {
+    const inv = fakeInventory([], [{state: 'ok', pending: 0}],
+        {destinationId: 'd1', label: 'Odoo one', revision: 4,
+            keys: ['session_refresh_sec'], ask: ['session_refresh_sec']});
+    const ind = indicator(inv);
+    assert.ok(labels(ind).includes('Stream Deck: keep your settings or use '
+        + 'Odoo\'s? (session_refresh_sec)'));
+    assert.ok(!labels(ind).some(t => t.startsWith('Apply Stream Deck')),
+        'no plain Apply while Odoo asks');
+    ind.menu.items.find(i => i.text === 'Keep my settings (rev. 4)')
+        .activate();
+    ind.menu.items.find(i => i.text === 'Use Odoo\'s settings (rev. 4)')
+        .activate();
+    assert.deepEqual(inv.clicks, [['keep', 'd1', 4], ['apply', 'd1', 4]]);
+    ind.destroy();
+});
+
 test('the status strings have their French translation', () => {
     const fr = fs.readFileSync(new URL('../../po/fr.po', import.meta.url),
         'utf8');
@@ -1240,7 +1294,7 @@ test('collectFacts reads the system, the checkout and the deck settings',
         assert.deepEqual(facts, {hostname: 'deckhost',
             os: {name: 'Debian GNU/Linux', version: '13'},
             erplibre: {branch: 'dev/x', commit: 'abc123'},
-            deckProgram: 'controller'});
+            deckProgram: 'controller', deckPlugins: []});
         assert.deepEqual(fake.spawned.map(s => s.argv), [
             ['realpath', '-e', '--', `${EXT_LINK}/extension.js`],
             ['git', '-C', '/srv/invented-erplibre', 'rev-parse',
@@ -1293,4 +1347,827 @@ test('readServiceState asks systemd about the deck unit', async () => {
         'erplibre-home-streamdeck.service']);
     fake.onSpawn = () => ({exit: 1});
     assert.equal(await svc.readServiceState(), 'absent');
+    assert.equal(await svc.readServiceState(null, null), null,
+        'unreadable: what the caller asks for');
 });
+
+// ------------------------------------------------- deck plugins on disk
+
+test('collectFacts lists the deck plugins of the checkout and the user',
+    async () => {
+        const root = path.join(fake.root, 'checkout');
+        const ext = path.join(root, 'script/gnome-extension/erplibre_home');
+        const plugins = path.join(root,
+            'script/stream_deck/erplibre_streamdeck/plugins');
+        const mine = path.join(fake.env.XDG_CONFIG_HOME, 'erplibre-home',
+            'deck-plugins');
+        for (const d of [ext, plugins, mine])
+            fs.mkdirSync(d, {recursive: true});
+        for (const f of ['timers.py', '_base.py', 'Bad-Name.py', 'notes.txt',
+            'clock.py'])
+            fs.writeFileSync(path.join(plugins, f), '');
+        fs.mkdirSync(path.join(plugins, 'folder.py'));
+        for (const f of ['custom.py', 'timers.py'])
+            fs.writeFileSync(path.join(mine, f), '');
+        fake.onSpawn = argv => {
+            if (argv[0] === 'realpath')
+                return {stdout: `${ext}/extension.js\n`};
+            return {stdout: 'x\n'};
+        };
+        const facts = await svc.collectFacts({extensionPath: EXT_LINK,
+            osRelease: []});
+        assert.deepEqual([...facts.deckPlugins].sort(),
+            ['clock', 'custom', 'timers']);
+        fake.onSpawn = () => ({exit: 1});
+        const outside = await svc.collectFacts({extensionPath: EXT_LINK,
+            osRelease: []});
+        assert.deepEqual(outside.deckPlugins, [], 'none outside a checkout');
+    });
+
+test('the report carries the deck plugins of the facts', async () => {
+    harness();
+    h.facts.deckPlugins = ['timers', 'clock', 'Bad'];
+    h.usb.emit([]);
+    await settle();
+    assert.deepEqual(h.calls[0].body.state.deck_plugins, ['clock', 'timers']);
+});
+
+// ------------------------------------------------- Odoo configuration
+
+const HASH = '0123456789abcdef'.repeat(4);
+const CONF = '# kept comment\nINVENTED_KEY=1\nDECK_PROGRAM=tiler\nGAMES=on\n';
+const RESTART = ['systemctl', '--user', 'restart',
+    'erplibre-home-streamdeck.service'];
+
+function confPath() {
+    return path.join(fake.env.XDG_CONFIG_HOME, 'erplibre-home',
+        'streamdeck.conf');
+}
+
+const confBytes = () => fs.readFileSync(confPath());
+const confText = () => fs.readFileSync(confPath(), 'latin1');
+const restarts = () => fake.spawned.filter(s => s.argv[0] === 'systemctl' &&
+    s.argv.includes('restart')).map(s => s.argv);
+const pilotFile = () => path.join(fake.env.XDG_STATE_HOME, 'erplibre-home',
+    'pilot.json');
+
+function config(revision, settings, {locked = [], ask} = {}) {
+    return {revision, hash: HASH, settings, locked, ...ask ? {ask} : {}};
+}
+
+/**
+ * A service piloted by `pilot`, whose first report is out; `h.announced`
+ * collects what it announces.
+ */
+async function piloted({conf = CONF, dests = [D1], pilot = 'd1',
+    tokens = {d1: TOKEN}} = {}) {
+    if (conf !== null) deckConf(conf);
+    harness({dests, pilot, tokens});
+    h.announced = [];
+    h.service.connect('announce', p => h.announced.push(p));
+    h.usb.emit([DECK_A]);
+    await settle(40);
+    return h;
+}
+
+/** Replies to call `i` with `config` and lets the service handle it. */
+async function offer(i, cfg) {
+    h.calls[i].reply(...ok([], {config: cfg}));
+    await settle(60);
+}
+
+async function heartbeat() {
+    const t = liveMs(HEARTBEAT_S * 1000);
+    assert.equal(t.length, 1, 'one heartbeat');
+    fire(t[0]);
+    await settle(40);
+    return h.calls[h.calls.length - 1];
+}
+
+test('the schema holds the pilot and the apply request, empty by default',
+    () => {
+        const xml = fs.readFileSync(new URL(
+            '../../schemas/org.gnome.shell.extensions.erplibre-home'
+            + '.gschema.xml', import.meta.url), 'utf8');
+        for (const key of ['inventory-pilot', 'inventory-apply-request'])
+            assert.match(xml, new RegExp(`<key name="${key}" type="s">`
+                + '<default>""</default>'), key);
+    });
+
+test('the pilot body carries the local values, read again at each report',
+    async () => {
+        await piloted({conf: 'DECK_PROGRAM=controller\nGAMES=bad\n'});
+        assert.deepEqual(h.calls[0].body.config, {pilot: true,
+            revision_applied: null, current: {deck_program: 'controller',
+                plugins_off: null, session_refresh_sec: null, games: null},
+            result: null, choice: null});
+        await reply(0, ok());
+        deckConf('DECK_PROGRAM=none\nDECK_SESSION_REFRESH_SEC=2.5\n');
+        const next = await heartbeat();
+        assert.deepEqual(next.body.config.current, {deck_program: 'none',
+            plugins_off: null, session_refresh_sec: 2.5, games: null});
+    });
+
+test('only_the_pilot_destination_is_applied', async () => {
+    await piloted({dests: [D1, D2], pilot: 'd2',
+        tokens: {d1: TOKEN, d2: TOKEN}});
+    assert.equal(h.calls.length, 2);
+    const of = id => h.calls.findIndex(c => c.db === (id === 'd1'
+        ? 'base1' : 'base2'));
+    assert.deepEqual(h.calls[of('d1')].body.config, {pilot: false});
+    assert.equal(h.calls[of('d2')].body.config.pilot, true);
+    const before = confBytes();
+    await offer(of('d1'), config(7, {deck_program: 'none'}));
+    await offer(of('d2'), config(3, {deck_program: 'controller'}));
+    assert.deepEqual(h.announced.map(p => [p.destinationId, p.revision]),
+        [['d2', 3]], 'only the pilot announces');
+    assert.equal(h.service.pendingConfig().destinationId, 'd2');
+    assert.equal(await h.service.applyConfig('d1', 7), null);
+    assert.deepEqual(confBytes(), before, 'another Odoo writes nothing');
+    const r = await h.service.applyConfig('d2', 3);
+    assert.equal(r.status, 'applied');
+    assert.match(confText(), /^DECK_PROGRAM=controller$/m);
+    // Unchecking the pilot withdraws what it offered.
+    h.settings.set_string('inventory-pilot', '');
+    await settle(40);
+    assert.equal(h.service.pendingConfig(), null);
+});
+
+test('a_revision_is_announced_once', async () => {
+    await piloted();
+    await offer(0, config(3, {deck_program: 'controller'}));
+    assert.deepEqual(h.announced, [{destinationId: 'd1', label: 'Odoo one',
+        revision: 3, keys: ['deck_program'], ask: []}]);
+    await heartbeat();
+    await offer(1, config(3, {deck_program: 'controller'}));
+    assert.equal(h.announced.length, 1, 'the same revision again: silent');
+    // A start after a screen lock does not announce it again either.
+    h.service.stop();
+    await settle();
+    harness({pilot: 'd1'});
+    const again = [];
+    h.service.connect('announce', p => again.push(p));
+    h.usb.emit([DECK_A]);
+    await settle(40);
+    await offer(0, config(3, {deck_program: 'controller'}));
+    assert.deepEqual(again, []);
+    assert.equal(h.service.pendingConfig().revision, 3,
+        'still pending, in the menu and the preferences');
+    await heartbeat();
+    await offer(1, config(4, {deck_program: 'none'}));
+    assert.deepEqual(again.map(p => p.revision), [4]);
+});
+
+test('nothing_applies_without_a_click', async () => {
+    await piloted();
+    const before = confBytes();
+    await offer(0, config(3, {deck_program: 'controller', games: 'off'}));
+    assert.deepEqual(confBytes(), before);
+    assert.deepEqual(restarts(), []);
+    assert.deepEqual(h.service.pendingConfig(), {destinationId: 'd1',
+        label: 'Odoo one', revision: 3, keys: ['deck_program', 'games'],
+        ask: []});
+    const next = await heartbeat();
+    assert.equal(next.body.config.result, null);
+    assert.equal(next.body.config.revision_applied, null);
+    assert.deepEqual(confBytes(), before);
+});
+
+test('the_first_pilot_asks_before_applying: the question, not an apply',
+    async () => {
+        await piloted({conf: `${CONF}DECK_SESSION_REFRESH_SEC=5\n`});
+        await offer(0, config(3, {session_refresh_sec: 2,
+            plugins_off: ['sound']}, {locked: ['plugins_off'],
+            ask: ['session_refresh_sec']}));
+        assert.deepEqual(h.announced, [{destinationId: 'd1',
+            label: 'Odoo one', revision: 3,
+            keys: ['plugins_off', 'session_refresh_sec'],
+            ask: ['session_refresh_sec']}]);
+        assert.deepEqual(restarts(), []);
+    });
+
+test('keep_local_writes_nothing_and_reports_the_choice', async () => {
+    await piloted({conf: `${CONF}DECK_SESSION_REFRESH_SEC=5\n`});
+    fs.chmodSync(confPath(), 0o640);
+    const before = confBytes();
+    const mtime = fs.statSync(confPath()).mtimeMs;
+    await offer(0, config(3, {session_refresh_sec: 2,
+        plugins_off: ['sound']}, {locked: ['plugins_off'],
+        ask: ['session_refresh_sec']}));
+    assert.equal(await h.service.keepLocal('d1', 3), true);
+    await settle(40);
+    assert.deepEqual(confBytes(), before);
+    assert.equal(fs.statSync(confPath()).mtimeMs, mtime, 'not even touched');
+    assert.deepEqual(restarts(), []);
+    assert.equal(h.service.pendingConfig(), null, 'the question is answered');
+    assert.equal(h.calls.length, 2, 'the choice goes at once');
+    assert.equal(h.calls[1].body.config.choice, 'keep_local');
+    assert.equal(h.calls[1].body.config.result, null);
+    assert.equal(h.calls[1].body.config.revision_applied, null,
+        'a revision kept is not one applied');
+    await reply(1, ok());
+    const next = await heartbeat();
+    assert.equal(next.body.config.choice, null, 'sent once');
+    assert.equal(next.body.config.revision_applied, null);
+});
+
+test('locked_keys_still_need_the_usual_apply_after_keep_local', async () => {
+    await piloted({conf: `${CONF}DECK_SESSION_REFRESH_SEC=5\n`});
+    await offer(0, config(3, {session_refresh_sec: 2,
+        plugins_off: ['sound']}, {locked: ['plugins_off'],
+        ask: ['session_refresh_sec']}));
+    await h.service.keepLocal('d1', 3);
+    await settle(40);
+    const before = confBytes();
+    // Odoo adopted the local value: the next revision asks nothing.
+    await offer(1, config(4, {session_refresh_sec: 5,
+        plugins_off: ['sound']}, {locked: ['plugins_off']}));
+    assert.deepEqual(h.announced.map(p => [p.revision, p.keys, p.ask]), [
+        [3, ['plugins_off', 'session_refresh_sec'], ['session_refresh_sec']],
+        [4, ['plugins_off'], []]]);
+    assert.equal(await h.service.keepLocal('d1', 4), false);
+    assert.deepEqual(confBytes(), before, 'still waiting for the click');
+    const r = await h.service.applyConfig('d1', 4);
+    assert.equal(r.status, 'applied');
+    assert.match(confText(), /^DECK_PLUGINS_OFF=sound$/m);
+    assert.match(confText(), /^DECK_SESSION_REFRESH_SEC=5$/m);
+});
+
+test('take_odoo_applies_and_reports_the_choice', async () => {
+    await piloted({conf: `${CONF}DECK_SESSION_REFRESH_SEC=5\n`});
+    await offer(0, config(3, {session_refresh_sec: 2,
+        plugins_off: ['sound']}, {locked: ['plugins_off'],
+        ask: ['session_refresh_sec']}));
+    const r = await h.service.applyConfig('d1', 3);
+    await settle(40);
+    assert.equal(r.status, 'applied');
+    assert.match(confText(), /^DECK_SESSION_REFRESH_SEC=2$/m);
+    assert.match(confText(), /^DECK_PLUGINS_OFF=sound$/m);
+    const sent = h.calls[1].body.config;
+    assert.equal(sent.choice, 'take_odoo');
+    assert.deepEqual(sent.result, {revision: 3, status: 'applied',
+        reason: null, at: h.now});
+    assert.equal(sent.revision_applied, 3);
+});
+
+test('keep_local_is_refused_without_ask', async () => {
+    await piloted();
+    await offer(0, config(3, {games: 'off'}));
+    assert.equal(await h.service.keepLocal('d1', 3), false);
+    assert.equal(await h.service.keepLocal('d1', 9), false);
+    await settle(40);
+    assert.equal(h.calls.length, 1);
+    assert.equal(h.service.pendingConfig().revision, 3);
+    const next = await heartbeat();
+    assert.equal(next.body.config.choice, null);
+});
+
+test('the_question_is_asked_once_per_revision', async () => {
+    await piloted({conf: `${CONF}DECK_SESSION_REFRESH_SEC=5\n`});
+    const asking = config(3, {session_refresh_sec: 2},
+        {ask: ['session_refresh_sec']});
+    await offer(0, asking);
+    await heartbeat();
+    await offer(1, asking);
+    assert.equal(h.announced.length, 1);
+    assert.deepEqual(h.announced[0].ask, ['session_refresh_sec']);
+});
+
+test('an_answer_odoo_settles_without_a_new_revision_is_announced',
+    async () => {
+        // Odoo takes the choice and adopts nothing (the local value became
+        // Odoo's meanwhile, or the policy is forced): the same revision
+        // comes back without ask, and its locked keys are offered.
+        await piloted({conf: `${CONF}DECK_SESSION_REFRESH_SEC=5\n`});
+        const settings = {session_refresh_sec: 2, plugins_off: ['sound']};
+        const asking = config(3, settings, {locked: ['plugins_off'],
+            ask: ['session_refresh_sec']});
+        await offer(0, asking);
+        assert.equal(await h.service.keepLocal('d1', 3), true);
+        await settle(40);
+        // A reply still asking, sent before the answer reached Odoo.
+        await offer(1, asking);
+        assert.equal(h.announced.length, 1, 'answered: not asked again');
+        assert.equal(h.service.pendingConfig(), null);
+        await heartbeat();
+        await offer(2, config(3, settings, {locked: ['plugins_off']}));
+        assert.deepEqual(h.announced.map(p => [p.revision, p.keys, p.ask]), [
+            [3, ['plugins_off', 'session_refresh_sec'],
+                ['session_refresh_sec']],
+            [3, ['plugins_off', 'session_refresh_sec'], []]]);
+        assert.equal(h.service.pendingConfig().revision, 3);
+        assert.equal(await h.service.keepLocal('d1', 3), false);
+        const r = await h.service.applyConfig('d1', 3);
+        assert.equal(r.status, 'applied');
+        assert.match(confText(), /^DECK_PLUGINS_OFF=sound$/m);
+        assert.match(confText(), /^DECK_SESSION_REFRESH_SEC=2$/m);
+    });
+
+test('an_unreadable_conf_sends_no_pilot_config', async () => {
+    await piloted();
+    await offer(0, config(3, {deck_program: 'controller'}));
+    assert.equal(h.service.pendingConfig().revision, 3);
+    // The file cannot be read: no local value is known, none is sent as
+    // null, and the reply's config, if any, is not taken.
+    fs.rmSync(confPath());
+    fs.mkdirSync(confPath());
+    const blind = await heartbeat();
+    assert.equal(Object.hasOwn(blind.body, 'config'), false);
+    await offer(1, null);
+    assert.equal(h.service.pendingConfig().revision, 3, 'still offered');
+    assert.equal(h.announced.length, 1);
+    fs.rmdirSync(confPath());
+    deckConf(CONF);
+    const next = await heartbeat();
+    assert.equal(next.body.config.pilot, true);
+    assert.equal(next.body.config.current.deck_program, 'tiler');
+});
+
+test('apply_writes_then_restarts_an_active_unit', async () => {
+    await piloted();
+    fs.chmodSync(confPath(), 0o640);
+    let atRestart = null;
+    fake.onSpawn = argv => {
+        if (argv.includes('restart')) atRestart = confText();
+        return {};
+    };
+    await offer(0, config(3, {deck_program: 'controller',
+        plugins_off: ['sound', 'clock']}, {locked: ['plugins_off']}));
+    const r = await h.service.applyConfig('d1', 3);
+    assert.deepEqual(r, {revision: 3, status: 'applied', reason: null,
+        at: h.now});
+    assert.equal(confText(), '# kept comment\nINVENTED_KEY=1\n'
+        + 'DECK_PROGRAM=controller\nGAMES=on\nDECK_PLUGINS_OFF=sound,clock\n');
+    assert.equal(fs.statSync(confPath()).mode & 0o777, 0o640,
+        'the mode is kept');
+    assert.deepEqual(restarts(), [RESTART]);
+    assert.equal(atRestart, confText(), 'written before the restart');
+});
+
+test('apply_does_not_restart_for_games_only', async () => {
+    await piloted();
+    await offer(0, config(3, {games: 'off', deck_program: 'tiler'}));
+    const r = await h.service.applyConfig('d1', 3);
+    assert.equal(r.status, 'applied');
+    assert.match(confText(), /^GAMES=off$/m);
+    assert.deepEqual(restarts(), []);
+});
+
+test('an_inactive_unit_is_not_started', async () => {
+    await piloted();
+    h.serviceState = 'inactive';
+    await offer(0, config(3, {deck_program: 'controller'}));
+    const r = await h.service.applyConfig('d1', 3);
+    assert.equal(r.status, 'applied');
+    assert.match(confText(), /^DECK_PROGRAM=controller$/m);
+    assert.deepEqual(fake.spawned.filter(s => s.argv[0] === 'systemctl'),
+        [], 'neither restarted nor started');
+});
+
+test('a_failed_unit_is_not_started', async () => {
+    await piloted();
+    h.serviceState = 'failed';
+    await offer(0, config(3, {deck_program: 'controller'}));
+    const r = await h.service.applyConfig('d1', 3);
+    assert.equal(r.status, 'applied');
+    assert.match(confText(), /^DECK_PROGRAM=controller$/m);
+    assert.deepEqual(restarts(), [], 'left to systemd, not started');
+});
+
+test('an_unreadable_unit_state_starts_nothing', async () => {
+    await piloted();
+    await offer(0, config(3, {deck_program: 'controller'}));
+    h.serviceUnreadable = true;
+    const r = await h.service.applyConfig('d1', 3);
+    assert.deepEqual(r, {revision: 3, status: 'refused',
+        reason: 'restart_failed', at: h.now});
+    assert.match(confText(), /^DECK_PROGRAM=controller$/m, 'written');
+    assert.deepEqual(restarts(), []);
+});
+
+test('a_unit_state_past_the_deadline_starts_nothing', async () => {
+    await piloted();
+    await offer(0, config(3, {plugins_off: ['sound']}));
+    h.serviceHang = true;
+    let result = null;
+    h.service.applyConfig('d1', 3).then(r => {
+        result = r;
+    });
+    await settle(60);
+    assert.equal(result, null, 'the state reading hangs');
+    for (const t of live().filter(t => t.ms === TIMEOUT_S * 1000)) fire(t);
+    await settle(40);
+    assert.deepEqual(result, {revision: 3, status: 'refused',
+        reason: 'restart_failed', at: h.now});
+    assert.deepEqual(restarts(), []);
+});
+
+test('a_missing_unit_refuses_unit_missing_after_writing', async () => {
+    await piloted();
+    h.serviceState = 'absent';
+    await offer(0, config(3, {deck_program: 'controller'}));
+    const r = await h.service.applyConfig('d1', 3);
+    assert.deepEqual(r, {revision: 3, status: 'refused',
+        reason: 'unit_missing', at: h.now});
+    assert.match(confText(), /^DECK_PROGRAM=controller$/m, 'written');
+    assert.deepEqual(restarts(), []);
+    await settle(40);
+    assert.deepEqual(h.calls[1].body.config.result, r);
+    assert.equal(h.calls[1].body.config.revision_applied, null);
+});
+
+test('a_write_failure_refuses_write_failed_and_leaves_the_file',
+    async () => {
+        await piloted();
+        const dir = path.dirname(confPath());
+        const before = confBytes();
+        await offer(0, config(3, {deck_program: 'controller'}));
+        fs.chmodSync(dir, 0o555);
+        let r;
+        try {
+            r = await h.service.applyConfig('d1', 3);
+        } finally {
+            fs.chmodSync(dir, 0o755);
+        }
+        assert.equal(r.status, 'refused');
+        assert.equal(r.reason, 'write_failed');
+        assert.deepEqual(confBytes(), before);
+        assert.deepEqual(fs.readdirSync(dir), ['streamdeck.conf'],
+            'no temporary file left');
+        assert.deepEqual(restarts(), []);
+        assert.equal(h.service.pendingConfig().revision, 3,
+            'still offered, for another click');
+    });
+
+test('apply follows a linked streamdeck.conf and renames over its target',
+    async () => {
+        const dots = path.join(fake.env.XDG_CONFIG_HOME, 'dotfiles');
+        fs.mkdirSync(dots, {recursive: true});
+        const target = path.join(dots, 'streamdeck.conf');
+        fs.writeFileSync(target, CONF);
+        fs.chmodSync(target, 0o640);
+        fs.mkdirSync(path.dirname(confPath()), {recursive: true});
+        fs.symlinkSync('../dotfiles/streamdeck.conf', confPath());
+        const ino = fs.statSync(target).ino;
+        await piloted({conf: null});
+        await offer(0, config(3, {deck_program: 'controller'}));
+        assert.equal((await h.service.applyConfig('d1', 3)).status,
+            'applied');
+        assert.equal(fs.readlinkSync(confPath()),
+            '../dotfiles/streamdeck.conf', 'the link is kept');
+        assert.match(fs.readFileSync(target, 'latin1'),
+            /^DECK_PROGRAM=controller$/m);
+        assert.notEqual(fs.statSync(target).ino, ino,
+            'replaced by a rename, not rewritten in place');
+        assert.equal(fs.statSync(target).mode & 0o777, 0o640);
+        assert.deepEqual(fs.readdirSync(dots), ['streamdeck.conf'],
+            'no temporary file left');
+    });
+
+test('apply renames over a conf of several names, never in place',
+    async () => {
+        await piloted();
+        const other = path.join(fake.env.XDG_CONFIG_HOME, 'other.conf');
+        fs.linkSync(confPath(), other);
+        const ino = fs.statSync(confPath()).ino;
+        await offer(0, config(3, {deck_program: 'controller'}));
+        assert.equal((await h.service.applyConfig('d1', 3)).status,
+            'applied');
+        assert.match(confText(), /^DECK_PROGRAM=controller$/m);
+        assert.notEqual(fs.statSync(confPath()).ino, ino);
+        assert.equal(fs.readFileSync(other, 'latin1'), CONF,
+            'the other name keeps the whole former file');
+    });
+
+test('a failed rename leaves the file whole and no temporary file',
+    async () => {
+        await piloted();
+        const before = confBytes();
+        await offer(0, config(3, {deck_program: 'controller'}));
+        fake.moveFails = true;
+        const r = await h.service.applyConfig('d1', 3);
+        assert.equal(r.reason, 'write_failed');
+        await settle(40);
+        assert.deepEqual(confBytes(), before);
+        assert.deepEqual(fs.readdirSync(path.dirname(confPath())),
+            ['streamdeck.conf']);
+    });
+
+test('apply creates a missing streamdeck.conf by a rename too', async () => {
+    await piloted({conf: null});
+    await offer(0, config(3, {deck_program: 'controller'}));
+    assert.equal((await h.service.applyConfig('d1', 3)).status, 'applied');
+    assert.equal(confText(), 'DECK_PROGRAM=controller\n');
+    assert.deepEqual(fs.readdirSync(path.dirname(confPath())),
+        ['streamdeck.conf']);
+});
+
+test('a_restart_failure_refuses_restart_failed', async () => {
+    await piloted();
+    fake.onSpawn = argv => (argv.includes('restart') ? {exit: 1} : {});
+    await offer(0, config(3, {deck_program: 'controller'}));
+    const r = await h.service.applyConfig('d1', 3);
+    assert.equal(r.status, 'refused');
+    assert.equal(r.reason, 'restart_failed');
+    assert.match(confText(), /^DECK_PROGRAM=controller$/m);
+});
+
+test('a_refused_restart_stays_pending_when_odoo_sends_it_again',
+    async () => {
+        await piloted();
+        fake.onSpawn = argv => (argv.includes('restart') ? {exit: 1} : {});
+        const rev3 = config(3, {deck_program: 'controller', games: 'off'});
+        await offer(0, rev3);
+        const r = await h.service.applyConfig('d1', 3);
+        assert.equal(r.reason, 'restart_failed');
+        await settle(40);
+        assert.deepEqual(h.calls[1].body.config.result, r);
+        // The file holds the values now; the deck still runs the old ones.
+        await offer(1, rev3);
+        assert.equal(h.calls.length, 2, 'not reported applied');
+        assert.deepEqual(h.service.pendingConfig()?.keys, ['deck_program'],
+            'still waits for another click, games needs no restart');
+        const next = await heartbeat();
+        assert.equal(next.body.config.result, null);
+        assert.equal(next.body.config.revision_applied, null);
+        fake.onSpawn = () => ({});
+        const again = await h.service.applyConfig('d1', 3);
+        assert.equal(again.status, 'applied');
+        assert.equal(restarts().length, 2, 'restarted at the second click');
+    });
+
+test('a_unit_missing_refusal_stays_pending_until_the_unit_runs',
+    async () => {
+        await piloted();
+        h.serviceState = 'absent';
+        await offer(0, config(3, {deck_program: 'controller'}));
+        assert.equal((await h.service.applyConfig('d1', 3)).reason,
+            'unit_missing');
+        await settle(40);
+        await offer(1, config(3, {deck_program: 'controller'}));
+        assert.equal(h.calls.length, 2, 'not reported applied');
+        assert.equal(h.service.pendingConfig()?.revision, 3);
+        assert.equal((await h.service.applyConfig('d1', 3)).reason,
+            'unit_missing', 'still no unit');
+        h.serviceState = 'active';
+        const r = await h.service.applyConfig('d1', 3);
+        assert.equal(r.status, 'applied');
+        assert.deepEqual(restarts(), [RESTART]);
+    });
+
+test('a_restart_still_owed_is_offered_with_the_next_revision', async () => {
+    await piloted();
+    fake.onSpawn = argv => (argv.includes('restart') ? {exit: 1} : {});
+    await offer(0, config(3, {deck_program: 'controller'}));
+    await h.service.applyConfig('d1', 3);
+    await settle(40);
+    // Odoo adopts a free local value: the file holds the next revision.
+    await offer(1, config(4, {deck_program: 'controller', games: 'on'}));
+    assert.equal(h.calls.length, 2, 'not applied silently');
+    assert.deepEqual(h.announced.map(p => [p.revision, p.keys]),
+        [[3, ['deck_program']], [4, ['deck_program']]]);
+    fake.onSpawn = () => ({});
+    assert.equal((await h.service.applyConfig('d1', 4)).status, 'applied');
+    assert.equal(restarts().length, 2);
+    await settle(40);
+    // Nothing owed any more: values the file holds apply silently.
+    await offer(2, config(5, {deck_program: 'controller', games: 'on'}));
+    assert.equal(h.calls.at(-1).body.config.result.revision, 5);
+    assert.equal(restarts().length, 2);
+});
+
+test('a_restart_owed_for_a_key_odoo_no_longer_sets_is_dropped',
+    async () => {
+        await piloted();
+        fake.onSpawn = argv => (argv.includes('restart') ? {exit: 1} : {});
+        await offer(0, config(3, {deck_program: 'controller'}));
+        await h.service.applyConfig('d1', 3);
+        await settle(40);
+        // deck_program is the employee's again; games the file holds.
+        await offer(1, config(4, {games: 'on'}));
+        assert.equal(h.calls.at(-1).body.config.result.revision, 4,
+            'applied silently');
+        assert.equal(h.service.pendingConfig(), null);
+    });
+
+test('a_restart_owed_outlives_a_screen_lock', async () => {
+    await piloted();
+    fake.onSpawn = argv => (argv.includes('restart') ? {exit: 1} : {});
+    await offer(0, config(3, {deck_program: 'controller'}));
+    await h.service.applyConfig('d1', 3);
+    await settle(40);
+    h.service.stop();
+    await settle();
+    harness({pilot: 'd1'});
+    h.usb.emit([DECK_A]);
+    await settle(40);
+    await offer(0, config(3, {deck_program: 'controller'}));
+    assert.equal(h.calls.length, 1, 'not reported applied');
+    assert.deepEqual(h.service.pendingConfig()?.keys, ['deck_program']);
+});
+
+test('an_unchanged_revision_is_applied_silently', async () => {
+    await piloted();
+    const before = confBytes();
+    const mtime = fs.statSync(confPath()).mtimeMs;
+    await offer(0, config(3, {deck_program: 'tiler', games: 'on'},
+        {locked: ['games']}));
+    assert.deepEqual(h.announced, []);
+    assert.equal(h.service.pendingConfig(), null);
+    assert.deepEqual(confBytes(), before);
+    assert.equal(fs.statSync(confPath()).mtimeMs, mtime);
+    assert.deepEqual(restarts(), []);
+    assert.equal(h.calls.length, 2, 'reported at once');
+    assert.deepEqual(h.calls[1].body.config.result, {revision: 3,
+        status: 'applied', reason: null, at: h.now});
+    assert.equal(h.calls[1].body.config.revision_applied, 3);
+    await offer(1, config(3, {deck_program: 'tiler', games: 'on'},
+        {locked: ['games']}));
+    assert.equal(h.calls.length, 2, 'no loop on the same revision');
+});
+
+test('the_result_goes_in_the_next_report_at_once', async () => {
+    await piloted();
+    await offer(0, config(3, {deck_program: 'controller'}));
+    assert.equal(h.calls.length, 1, 'nothing before the click');
+    const r = await h.service.applyConfig('d1', 3);
+    await settle(40);
+    assert.equal(h.calls.length, 2);
+    const sent = h.calls[1].body.config;
+    assert.deepEqual(sent.result, r);
+    assert.equal(sent.revision_applied, 3);
+    assert.equal(sent.current.deck_program, 'controller',
+        'the file read again');
+    assert.equal(h.factsReads.length, 2,
+        'the facts read again: deck_program changed');
+    await offer(1, config(3, {deck_program: 'controller'}));
+    assert.equal(h.service.pendingConfig(), null);
+    const next = await heartbeat();
+    assert.equal(next.body.config.result, null, 'answered 200: settled');
+    assert.equal(next.body.config.revision_applied, 3);
+    assert.equal(await h.service.applyConfig('d1', 3), null,
+        'an applied revision is not applied again');
+});
+
+test('a value outside the schema refuses the revision once, writes nothing',
+    async () => {
+        await piloted();
+        const before = confBytes();
+        await offer(0, config(3, {deck_program: '/bin/sh', games: 'off'}));
+        assert.deepEqual(h.announced, []);
+        assert.equal(h.service.pendingConfig(), null);
+        assert.deepEqual(confBytes(), before);
+        assert.equal(h.calls.length, 2);
+        assert.deepEqual(h.calls[1].body.config.result, {revision: 3,
+            status: 'refused', reason: 'invalid:deck_program', at: h.now});
+        await offer(1, config(3, {deck_program: '/bin/sh', games: 'off'}));
+        assert.equal(h.calls.length, 2, 'refused once, no loop');
+        assert.equal(await h.service.applyConfig('d1', 3), null);
+        assert.deepEqual(confBytes(), before);
+    });
+
+test('refusals decided by replies do not chain reports', async () => {
+    await piloted();
+    await offer(0, config(3, {deck_program: '/bin/sh'}));
+    assert.equal(h.calls.length, 2, 'the first refusal goes at once');
+    await offer(1, config(4, {deck_program: '/bin/sh'}));
+    assert.equal(h.calls.length, 2, 'the next waits for the heartbeat');
+    const next = await heartbeat();
+    assert.deepEqual(next.body.config.result, {revision: 4,
+        status: 'refused', reason: 'invalid:deck_program', at: h.now});
+    await offer(h.calls.indexOf(next), config(5, {deck_program: '/bin/sh'}));
+    assert.equal(h.calls.length, 4, 'after the heartbeat, at once again');
+});
+
+test('silent applications decided by replies do not chain reports',
+    async () => {
+        await piloted();
+        const held = {deck_program: 'tiler', games: 'on'};
+        await offer(0, config(3, held));
+        assert.equal(h.calls.length, 2);
+        await offer(1, config(4, held));
+        assert.equal(h.calls.length, 2, 'the next waits for the heartbeat');
+        const next = await heartbeat();
+        assert.equal(next.body.config.result.revision, 4);
+        assert.equal(next.body.config.revision_applied, 4);
+    });
+
+test('a chained report that decides nothing delays no later result',
+    async () => {
+        await piloted();
+        const bad = config(3, {deck_program: '/bin/sh'});
+        await offer(0, bad);
+        assert.equal(h.calls.length, 2);
+        await offer(1, bad);
+        assert.equal(h.calls.length, 2, 'refused already: nothing decided');
+        const next = await heartbeat();
+        await offer(h.calls.indexOf(next), config(4,
+            {deck_program: '/bin/sh'}));
+        assert.equal(h.calls.length, 4, 'a heartbeat reply reports at once');
+    });
+
+test('a click still reports at once after a reply-decided result',
+    async () => {
+        await piloted();
+        await offer(0, config(3, {deck_program: 'tiler', games: 'on'}));
+        await offer(1, config(4, {games: 'off'}));
+        assert.equal(h.calls.length, 2);
+        await h.service.applyConfig('d1', 4);
+        await settle(40);
+        assert.equal(h.calls.length, 3, 'a click is not chained');
+        assert.equal(h.calls[2].body.config.result.revision, 4);
+    });
+
+test('a reply without config withdraws the offer and the pilot file',
+    async () => {
+        await piloted();
+        await offer(0, config(3, {deck_program: 'controller'}));
+        assert.ok(fs.existsSync(pilotFile()));
+        const next = await heartbeat();
+        next.reply(...ok());
+        await settle(40);
+        assert.equal(h.service.pendingConfig(), null);
+        assert.equal(fs.existsSync(pilotFile()), false);
+    });
+
+test('pilot_json_is_0600_and_holds_no_secret', async () => {
+    await piloted();
+    await offer(0, config(3, {deck_program: 'controller',
+        plugins_off: ['sound']}, {locked: ['plugins_off']}));
+    const file = pilotFile();
+    assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+    const text = fs.readFileSync(file, 'utf8');
+    assert.deepEqual(JSON.parse(text), {destination: 'Odoo one', revision: 3,
+        locked: ['plugins_off']});
+    for (const secret of [TOKEN, 'TOKEN', D1.url, D1.db])
+        assert.ok(!text.includes(secret), secret);
+    h.settings.set_string('inventory-pilot', '');
+    await settle(40);
+    assert.equal(fs.existsSync(file), false, 'no pilot, no file');
+});
+
+test('the_journal_names_keys_never_tokens', async () => {
+    await piloted();
+    await offer(0, config(3, {deck_program: 'controller', games: 'off'}));
+    const lines = [];
+    const log = console.log;
+    console.log = (...a) => lines.push(a.join(' '));
+    try {
+        await h.service.applyConfig('d1', 3);
+        await settle(40);
+    } finally {
+        console.log = log;
+    }
+    const said = lines.filter(l => l.includes('inventory config'));
+    assert.equal(said.length, 1, lines.join('\n'));
+    for (const part of ['Odoo one', 'revision 3', 'deck_program,games',
+        'applied'])
+        assert.ok(said[0].includes(part), part);
+    assert.ok(!lines.some(l => l.includes(TOKEN)));
+});
+
+test('the_main_loop_never_waits_on_apply', async () => {
+    await piloted();
+    fake.onSpawn = argv => (argv.includes('restart') ? {hang: true} : {});
+    await offer(0, config(3, {deck_program: 'controller'}));
+    let result = null;
+    h.service.applyConfig('d1', 3).then(r => {
+        result = r;
+    });
+    await settle(60);
+    assert.equal(result, null, 'the click returned, the restart hangs');
+    assert.ok(!fake.spawned.some(s => s.argv[0] === '__sync__'));
+    const [hung] = fake.spawned.filter(s => s.argv.includes('restart'));
+    assert.ok(hung, 'restart started');
+    const deadline = live().filter(t => t.ms === TIMEOUT_S * 1000).at(-1);
+    fire(deadline);
+    await settle(40);
+    assert.equal(hung.killed, true);
+    assert.equal(result.status, 'refused');
+    assert.equal(result.reason, 'restart_failed');
+});
+
+test('the preferences ask through inventory-apply-request, cleared after',
+    async () => {
+        await piloted({conf: `${CONF}DECK_SESSION_REFRESH_SEC=5\n`});
+        await offer(0, config(3, {games: 'off'}));
+        h.settings.set_string('inventory-apply-request', 'd2:3');
+        await settle(60);
+        assert.equal(h.settings.get_string('inventory-apply-request'), '');
+        assert.match(confText(), /^GAMES=on$/m, 'not the pilot: nothing');
+        h.settings.set_string('inventory-apply-request', 'garbage');
+        await settle(60);
+        assert.equal(h.settings.get_string('inventory-apply-request'), '');
+        h.settings.set_string('inventory-apply-request', 'd1:3');
+        await settle(60);
+        assert.match(confText(), /^GAMES=off$/m);
+        assert.equal(h.settings.get_string('inventory-apply-request'), '');
+        await reply(1, ok());
+        const next = await heartbeat();
+        await offer(h.calls.indexOf(next), config(4,
+            {session_refresh_sec: 2}, {ask: ['session_refresh_sec']}));
+        h.settings.set_string('inventory-apply-request', 'd1:4:keep_local');
+        await settle(60);
+        assert.match(confText(), /^DECK_SESSION_REFRESH_SEC=5$/m);
+        assert.equal(h.calls.at(-1).body.config.choice, 'keep_local');
+    });

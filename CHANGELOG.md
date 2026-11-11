@@ -8,6 +8,31 @@ migrations that are not auto-applied.
 ## [Unreleased]
 
 ### Added
+- Odoo configuration, applied: a destination switched on as **Pilot** in
+  the preferences (one at most, none by default) may configure the
+  Stream Deck. A new revision is announced once, by a notification, an
+  entry of the device indicator's menu and a button of the preferences;
+  nothing is written before the employee's click. At the first pilot
+  report Odoo may ask to keep the local settings or use its own. The
+  click rewrites `streamdeck.conf` atomically (a temporary file renamed
+  over it, a symbolic link followed and kept), restarts the deck unit when
+  it runs and a restarting key changed, and reports `applied` or the
+  refusal at once; a revision the file holds already is reported applied
+  silently, unless the restart it needs failed: it then stays offered
+  for another click. `pilot.json` names the pilot's locked keys for
+  ERPLibre, the report carries `state.deck_plugins`, and the GSettings
+  keys `inventory-pilot` and `inventory-apply-request` are added.
+- Odoo configuration, pure half (`lib/deck-config.js`): the closed list
+  of settings an Odoo may set (`deck_program`, `plugins_off`,
+  `session_refresh_sec`, `games`), the validation of the `config` of a
+  report reply (a value outside the schema refuses the whole revision
+  with `invalid:<key>`, the only refusal reason of a revision; a
+  `config` of another shape is ignored), the reading of the local values of
+  `streamdeck.conf` as the deck's settings library reads them (a key the
+  file lacks reads null: nothing local to keep), and its
+  rewrite by the rule of ERPLibre's writer, byte for byte outside the
+  managed lines. The fixtures of `test/fixtures/streamdeck_conf/` are
+  shared with ERPLibre.
 - Odoo inventory: the extension reports the Stream Decks of the
   workstation, its deck service and its versions to the Odoo instances
   that have the ERPLibre module `erplibre_streamdeck`, through
@@ -29,6 +54,13 @@ migrations that are not auto-applied.
   the same two commands, unchanged without the variables.
 
 ### Changed
+- `CONTRACT.md` 1.3 and inventory protocol 1.1: the report carries
+  `config` (`{"pilot": false}` until a destination is the pilot) and
+  `state.deck_plugins`; the reply may carry the configuration of the
+  pilot, with `ask` at the first pilot report. The contract states the
+  keys, the shapes both ways, the first-pilot rule, the refusal reasons,
+  `pilot.json` and the GSettings keys `inventory-pilot` and
+  `inventory-apply-request`.
 - `CONTRACT.md` 1.2 states the Odoo inventory: its routes, bodies, error
   codes, bounds, the keyring schema and the state file; the extension
   relies on the Odoo module's routes, on `streamdeck.conf` and on the

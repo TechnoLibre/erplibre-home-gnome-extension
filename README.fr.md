@@ -125,6 +125,7 @@ Schéma `org.gnome.shell.extensions.erplibre-home`. Clés notables :
 - `enable-icon-badges` (`b`, défaut `true`) — affiche les pastilles de comptage sur les icônes
 - `enable-claude-state-watch` (`b`, défaut `true`) — surveille les fichiers d'état Claude pour le badge du crayon
 - `inventory-destinations` (`s`, JSON) — les instances Odoo qui reçoivent l'inventaire des Stream Deck ; aucun jeton là, les jetons vivent dans le trousseau GNOME
+- `inventory-pilot` (`s`) — l'id de la destination dont l'Odoo configure le Stream Deck, vide pour aucune ; `inventory-apply-request` (`s`) — écrite par les préférences pour appliquer une révision ou garder les valeurs locales, vidée par l'extension
 
 ## Inventaire Odoo
 
@@ -162,6 +163,33 @@ l'heure où ils ont eu lieu : GNOME Shell n'attend jamais Odoo. Un deck
 branché ou débranché pendant que l'extension est arrêtée (écran verrouillé,
 session fermée) est signalé à son démarrage suivant, daté de ce moment. Le
 protocole est dans [CONTRACT.md](CONTRACT.md), section « Odoo inventory ».
+
+### Configuration par Odoo
+
+Une destination au plus, cochée **Pilote** dans sa ligne, peut configurer
+le Stream Deck : le programme du deck, les plugins coupés, le
+rafraîchissement des sessions et les jeux, et rien d'autre. Son Odoo
+envoie une révision dans la réponse à une remontée ; rien n'est écrit
+avant le clic de l'employé. Une nouvelle révision s'annonce une fois par
+une notification avec **Appliquer**, par une entrée du menu de
+l'indicateur device qui liste les clés changées, et par un bouton
+**Appliquer** dans la ligne de la destination. À la première remontée
+pilote, Odoo peut plutôt demander : **Prendre les réglages d'Odoo**
+applique ses valeurs, **Garder mes réglages** n'écrit rien et Odoo adopte
+les valeurs locales ; les réglages verrouillés sont ensuite proposés avec
+**Appliquer**, comme d'habitude.
+
+Appliquer vérifie d'abord chaque valeur (une seule hors de la liste
+refuse toute la révision), puis réécrit
+`~/.config/erplibre-home/streamdeck.conf` en un remplacement atomique,
+toute autre ligne gardée, et redémarre le service du deck quand il tourne
+et qu'un réglage autre que les jeux a changé. Odoo reçoit aussitôt
+`applied` ou le refus et sa raison. Une révision que le fichier contient
+déjà est remontée appliquée, sans notification, sauf si son redémarrage a
+échoué : elle reste alors proposée jusqu'à ce qu'un clic redémarre le
+service.
+`$XDG_STATE_HOME/erplibre-home/pilot.json` dit au menu TODO d'ERPLibre
+quels réglages Odoo a verrouillés.
 
 ## Pastilles de comptage
 

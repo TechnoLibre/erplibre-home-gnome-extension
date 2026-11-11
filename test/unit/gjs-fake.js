@@ -26,6 +26,19 @@
  * - GLib.find_program_in_path finds only the names in `fake.programs`.
  * - GLib.timeout_add and friends record {ms, fn} in `fake.timeouts` and
  *   never fire by themselves.
+ * - Gio.File's asynchronous replace behaves as GIO's local one: without
+ *   REPLACE_DESTINATION it renames a temporary file over a regular file of
+ *   one name, keeping its mode, but writes IN PLACE a symbolic link's
+ *   target, a file of several names, a file whose directory is not
+ *   writable and a missing file; with REPLACE_DESTINATION it always
+ *   renames, a link replaced and not followed. A missing file fails its
+ *   asynchronous reads with an error that `matches` Gio.IOErrorEnum
+ *   NOT_FOUND. `query_info_async` reads without following links
+ *   (`get_is_symlink`, `get_symlink_target`, `unix::mode`);
+ *   `set_attributes_async` sets `unix::mode`; `move_async` renames, or
+ *   fails while `fake.moveFails` is set.
+ *   `enumerate_children_async` lists a directory, each entry with
+ *   `get_name` and `get_file_type`.
  * - Main.notify records [title, body] in `fake.notified`; the panel records
  *   each addToStatusArea in `fake.panel`; St.Clipboard records in
  *   `fake.clipboard`; each St widget records {type, props} in
@@ -34,7 +47,9 @@
  *   Gio.DBusExportedObject.wrapJSObject records {xml, object} in
  *   `fake.exported`; each Soup message records
  *   {method, uri, headers} in `fake.http`; each ModalDialog subclass
- *   instance lands in `fake.dialogs`.
+ *   instance lands in `fake.dialogs`. A MessageTray.Notification added to
+ *   its source lands in `fake.notifications`, with its `actions` ({label,
+ *   cb}) in the order added.
  * - A Soup message records its flags, its request body as text in `body`
  *   and the cancellable it was sent with; `answer(message, {status, body,
  *   error})` completes its send_and_read_async, `error` making the finish
@@ -140,6 +155,7 @@ export const fake = {
     exported: [],
     http: [],
     dialogs: [],
+    notifications: [],
     secrets: new Map(),
     secretError: null,
     secretLocked: false,
@@ -147,6 +163,8 @@ export const fake = {
     udevDevices: [],
     udevClients: [],
     udevMissing: false,
+    // Set: Gio.File.move_async fails, nothing renamed.
+    moveFails: false,
     udevEmit(action, device) {
         for (const c of this.udevClients)
             for (const h of c.handlers.filter(x => x.signal === 'uevent'))
@@ -163,7 +181,8 @@ export const fake = {
     reset() {
         removeRoot(this.root);
         for (const k of ['spawned', 'timeouts', 'notified', 'panel',
-            'clipboard', 'widgets', 'exported', 'http', 'dialogs'])
+            'clipboard', 'widgets', 'exported', 'http', 'dialogs',
+            'notifications'])
             this[k] = [];
         this.onSpawn = () => ({});
         this.programs = [];
@@ -174,6 +193,7 @@ export const fake = {
         this.udevDevices = [];
         this.udevClients = [];
         this.udevMissing = false;
+        this.moveFails = false;
         this.settings = null;
         this.uid = 1000;
         const {root, env} = freshEnv();
@@ -387,7 +407,7 @@ class FakeFile {
     // `res` carries the outcome to the matching *_finish.
     _later(cb, work) {
         let res;
-        try { res = {value: work()}; } catch (e) { res = {error: e}; }
+        try { res = {value: work()}; } catch (e) { res = {error: ioError(e)}; }
         setImmediate(() => cb?.(this, res));
     }
     _finish(res) {
@@ -401,9 +421,26 @@ class FakeFile {
     load_contents_finish(res) { return this._finish(res); }
     replace_contents_bytes_async(bytes, _etag, _backup, flags, _c, cb) {
         this._later(cb, () => {
+            const replace = !!(flags & Gio.FileCreateFlags.REPLACE_DESTINATION);
+            const mode = flags & Gio.FileCreateFlags.PRIVATE ? 0o600 : 0o666;
+            let st = null;
+            try {
+                st = fs.lstatSync(this._p);
+            } catch (_e) {}
+            let dirWritable = true;
+            try {
+                fs.accessSync(path.dirname(this._p), fs.constants.W_OK);
+            } catch (_e) {
+                dirWritable = false;
+            }
+            if (!replace && (st === null || st.isSymbolicLink() ||
+                st.nlink > 1 || !dirWritable)) {
+                fs.writeFileSync(this._p, bytes.get_data(), {mode});
+                return [true, null];
+            }
             const tmp = `${this._p}.fake-tmp`;
-            fs.writeFileSync(tmp, bytes.get_data(),
-                {mode: flags & Gio.FileCreateFlags.PRIVATE ? 0o600 : 0o666});
+            fs.writeFileSync(tmp, bytes.get_data(), {mode});
+            if (!replace) fs.chmodSync(tmp, st.mode & 0o7777);
             fs.renameSync(tmp, this._p);
             return [true, null];
         });
@@ -419,11 +456,72 @@ class FakeFile {
     delete_finish(res) { return this._finish(res); }
     query_info_async(_attrs, _flags, _prio, _c, cb) {
         this._later(cb, () => {
-            const target = fs.readlinkSync(this._p);
-            return {get_symlink_target: () => target};
+            const st = fs.lstatSync(this._p);
+            const target = st.isSymbolicLink() ? fs.readlinkSync(this._p)
+                : null;
+            return {
+                get_is_symlink: () => st.isSymbolicLink(),
+                get_symlink_target: () => target,
+                get_attribute_uint32: name =>
+                    (name === 'unix::mode' ? st.mode : 0),
+            };
         });
     }
     query_info_finish(res) { return this._finish(res); }
+    set_attributes_async(info, _flags, _prio, _c, cb) {
+        this._later(cb, () => {
+            const mode = info.get_attribute_uint32('unix::mode');
+            if (mode !== null) fs.chmodSync(this._p, mode & 0o7777);
+            return true;
+        });
+    }
+    set_attributes_finish(res) { return this._finish(res); }
+    move_async(dest, _flags, _prio, _c, _progress, cb) {
+        this._later(cb, () => {
+            if (fake.moveFails) throw new Error('rename failed');
+            fs.renameSync(this._p, dest.get_path());
+            return true;
+        });
+    }
+    move_finish(res) { return this._finish(res); }
+    enumerate_children_async(_attrs, _flags, _prio, _c, cb) {
+        this._later(cb, () => {
+            const entries = fs.readdirSync(this._p, {withFileTypes: true})
+                .map(e => ({get_name: () => e.name,
+                    get_file_type: () => (e.isDirectory()
+                        ? FileType.DIRECTORY : e.isFile() ? FileType.REGULAR
+                            : FileType.UNKNOWN)}));
+            return {
+                next_files_async(n, _p2, _c2, cb2) {
+                    const batch = entries.splice(0, n);
+                    setImmediate(() => cb2?.(this, {value: batch}));
+                },
+                next_files_finish: res => res.value,
+                close_async(_p2, _c2, cb2) { setImmediate(() => cb2?.(this)); },
+                close_finish: () => true,
+            };
+        });
+    }
+    enumerate_children_finish(res) { return this._finish(res); }
+}
+
+const FileType = {UNKNOWN: 0, REGULAR: 1, DIRECTORY: 2, SYMBOLIC_LINK: 3};
+
+/** Gio.FileInfo: the uint32 attributes set on it, null for one unset. */
+class FileInfo {
+    constructor() { this._attrs = {}; }
+    set_attribute_uint32(name, value) { this._attrs[name] = value; }
+    get_attribute_uint32(name) { return this._attrs[name] ?? null; }
+}
+const IOErrorEnum = {FAILED: 0, NOT_FOUND: 1};
+
+/** `e` as a GLib.Error of Gio.IOErrorEnum: a missing file is NOT_FOUND. */
+function ioError(e) {
+    const code = e?.code === 'ENOENT' ? IOErrorEnum.NOT_FOUND
+        : IOErrorEnum.FAILED;
+    if (e && typeof e === 'object')
+        e.matches = (domain, c) => domain === IOErrorEnum && c === code;
+    return e;
 }
 
 // Like GCancellable: `connect(cb)` runs cb at the cancellation, at once
@@ -457,6 +555,10 @@ const Gio = looseObject({
     SubprocessLauncher,
     File: looseObject({new_for_path: p => new FakeFile(p)}),
     FileCreateFlags: {NONE: 0, REPLACE_DESTINATION: 1, PRIVATE: 2},
+    FileCopyFlags: {NONE: 0, OVERWRITE: 1, BACKUP: 2, NOFOLLOW_SYMLINKS: 4},
+    FileInfo,
+    FileType,
+    IOErrorEnum,
     FileQueryInfoFlags: {NONE: 0, NOFOLLOW_SYMLINKS: 1},
     Cancellable,
     icon_new_for_string: s => ({icon: s}),
@@ -759,6 +861,38 @@ class ModalDialog {
     destroy() {}
 }
 
+// MessageTray of GNOME Shell 46 on: properties in, actions added by label.
+class TrayNotification {
+    constructor(props = {}) {
+        this.props = props;
+        this.source = props.source ?? null;
+        this.title = props.title ?? '';
+        this.body = props.body ?? '';
+        this.actions = [];
+    }
+    addAction(label, cb) { this.actions.push({label, cb}); }
+    connect() { return 1; }
+    destroy() { this.destroyed = true; }
+}
+
+class TraySource {
+    constructor(props = {}) {
+        this.props = props;
+        this.handlers = [];
+        this.destroyed = false;
+    }
+    addNotification(n) { fake.notifications.push(n); }
+    connect(signal, cb) {
+        this.handlers.push({signal, cb});
+        return this.handlers.length;
+    }
+    destroy() {
+        this.destroyed = true;
+        for (const h of this.handlers.filter(x => x.signal === 'destroy'))
+            h.cb(this);
+    }
+}
+
 class Extension {
     constructor(metadata = {}) {
         this.metadata = metadata;
@@ -806,6 +940,8 @@ const RESOURCES = {
         Ornament: loose(),
     },
     'resource:///org/gnome/shell/ui/modalDialog.js': {ModalDialog},
+    'resource:///org/gnome/shell/ui/messageTray.js': {
+        Source: TraySource, Notification: TrayNotification},
     'resource:///org/gnome/shell/extensions/extension.js': {Extension},
     'resource:///org/gnome/shell/misc/config.js': {PACKAGE_VERSION: '48.0'},
     'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js':

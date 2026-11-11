@@ -11,6 +11,7 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as MessageTray from 'resource:///org/gnome/shell/ui/messageTray.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Config from 'resource:///org/gnome/shell/misc/config.js';
 
@@ -19,7 +20,7 @@ import {runMigrationGjs} from './lib/settings.js';
 import {parseObject} from './lib/settings.js';
 import {exportSettingsAsObj} from './lib/settings.js';
 import {Debouncer, gitPull, gitCommitPush, SYNC_FILE, syncImportPath} from './lib/git-sync.js';
-import {setGettext} from './lib/i18n.js';
+import {setGettext, _} from './lib/i18n.js';
 import {resolveLinks, makeGioReadLink} from './lib/project-root.js';
 import {ClaudeStateWatcher} from './lib/claude-state.js';
 import {InventoryService} from './lib/inventory-service.js';
@@ -179,6 +180,7 @@ export default class ERPLibreHomeExtension extends Extension {
     #signalIds = [];
     #claudeState = null;
     #inventory = null;
+    #configSource = null;
 
     enable() {
         this.#dbus = Gio.DBusExportedObject.wrapJSObject(IFACE_XML, this);
@@ -235,6 +237,8 @@ export default class ERPLibreHomeExtension extends Extension {
                 shellVersion: Config.PACKAGE_VERSION ?? null,
                 extensionPath: this.path,
             });
+            this.#inventory.connect('announce',
+                pending => this._announceConfig(pending));
             this.#inventory.start();
         } catch (e) {
             console.log(`[ERPLibreHome] inventory: ${e.message}`);
@@ -323,11 +327,71 @@ export default class ERPLibreHomeExtension extends Extension {
         this._virtualKeyboard = null;
         try { this.#claudeState?.stop(); } catch (_e) {}
         this.#claudeState = null;
+        try { this.#configSource?.destroy(); } catch (_e) {}
+        this.#configSource = null;
         try { this.#inventory?.stop(); } catch (_e) {}
         this.#inventory = null;
         this.#registry = null;
         this.#settings = null;
         console.log('[ERPLibreHome] disabled');
+    }
+
+    /**
+     * Notifies a revision of the pilot Odoo that waits on the employee
+     * (InventoryService `announce`, once per revision), with the action
+     * « Apply », or, when Odoo asks at the first pilot report, « Use
+     * Odoo's settings » and « Keep my settings ». An action is the click
+     * that applies; the deck menu and the preferences offer the same.
+     * Before GNOME Shell 46 the notification carries no action.
+     */
+    _announceConfig(pending) {
+        const inventory = this.#inventory;
+        if (!pending || !inventory) return;
+        const {destinationId: id, revision: rev, label} = pending;
+        const asking = pending.ask.length > 0;
+        const title = asking
+            ? _('Stream Deck: keep your settings or use Odoo\'s?')
+            : _('New Stream Deck configuration — {label}')
+                .replace('{label}', label);
+        const body = asking
+            ? _('{label} sets other values for: {keys}')
+                .replace('{label}', label)
+                .replace('{keys}', pending.ask.join(', '))
+            : _('Revision {n} changes: {keys}').replace('{n}', rev)
+                .replace('{keys}', pending.keys.join(', '));
+        const click = call => () => call().catch(e =>
+            console.log(`[ERPLibreHome] inventory config: ${e.message}`));
+        const actions = asking
+            ? [[_('Use Odoo\'s settings'),
+                click(() => inventory.applyConfig(id, rev))],
+            [_('Keep my settings'), click(() => inventory.keepLocal(id, rev))]]
+            : [[_('Apply'), click(() => inventory.applyConfig(id, rev))]];
+        try {
+            if (Number.parseInt(Config.PACKAGE_VERSION, 10) < 46)
+                throw new Error('no notification action before GNOME 46');
+            const source = this._configSource();
+            const n = new MessageTray.Notification({source, title, body});
+            for (const [text, run] of actions) n.addAction(text, run);
+            source.addNotification(n);
+        } catch (e) {
+            console.log(`[ERPLibreHome] inventory notification: ${e.message}`);
+            Main.notify(title, body);
+        }
+    }
+
+    // The tray source of the configuration notifications, made at the
+    // first one and destroyed by disable().
+    _configSource() {
+        if (!this.#configSource) {
+            const source = new MessageTray.Source({title: 'ERPLibre Home',
+                iconName: 'input-tablet-symbolic'});
+            source.connect('destroy', () => {
+                if (this.#configSource === source) this.#configSource = null;
+            });
+            Main.messageTray.add(source);
+            this.#configSource = source;
+        }
+        return this.#configSource;
     }
 
     _buildIndicators() {

@@ -19,7 +19,10 @@ import {GALLERY_ACTION_HEADER} from '../../lib/gallery-launch.js';
 import {INVENTORY_PROTOCOL, HEARTBEAT_S, TIMEOUT_S, POLL_S, QUEUE_MAX,
     QUEUE_MAX_AGE_DAYS, ENROLL_PATH, REPORT_PATH, UNENROLL_PATH,
     ENROLL_METHODS, ERROR_CODES, buildState, diffDecks,
-    workstationFingerprint} from '../../lib/inventory.js';
+    workstationFingerprint, configBody} from '../../lib/inventory.js';
+import {CONFIG_KEYS, DECK_PROGRAMS, GAMES_VALUES, SESSION_REFRESH_RANGE,
+    PLUGINS_OFF_MAX, PLUGIN_ID_RE, DECK_PLUGINS_MAX, REFUSAL_REASONS,
+    CHOICES, validateConfig} from '../../lib/deck-config.js';
 import {createHmac} from 'node:crypto';
 
 const ROOT = new URL('../../', import.meta.url);
@@ -296,11 +299,12 @@ test('the controller menu reaches the gallery the contract states', () => {
 // lib/inventory.js; the GJS modules (keyring, state file) are read as text,
 // since importing them needs the fakes of gjs-fake.js.
 
-test('the contract is at 1.2 since the extension reports to Odoo', () => {
-    assert.ok(CONTRACT.includes('**Contract version: 1.2**'));
+test('the contract is at 1.3 since Odoo pilots the deck settings', () => {
+    assert.ok(CONTRACT.includes('**Contract version: 1.3**'));
+    assert.match(section('Versioning'), /^- \*\*1\.3:\*\* /m);
     assert.match(section('Versioning'), /^- \*\*1\.2:\*\* /m);
     const service = text('lib/inventory-service.js');
-    assert.ok(service.includes("export const CONTRACT_VERSION = '1.2';"));
+    assert.ok(service.includes("export const CONTRACT_VERSION = '1.3';"));
 });
 
 test('the extension relies on the Odoo routes of the inventory section', () => {
@@ -453,3 +457,146 @@ test('the fingerprint and the token are what the inventory section says',
         hmac), hmac(key, '0123abcd'));
         assert.equal(Buffer.alloc(32).toString('base64url').length, 43);
     });
+
+// The Odoo configuration (contract 1.3, protocol 1.1): the closed list of
+// settings, the shapes of `config` both ways and the first-pilot rule.
+
+// Rows of the configuration table: [wire key, conf line, values, restart].
+function configRows() {
+    return [...section('Odoo inventory').matchAll(
+        /^\| `(\w+)` \| `([A-Z_]+)` \| (.+) \| (yes|no) \|$/gm)]
+        .map((m) => [m[1], m[2], m[3], m[4]]);
+}
+
+test('the configuration table is the closed list of deck-config.js', () => {
+    const rows = configRows();
+    assert.deepEqual(rows.map((r) => r[0]), Object.keys(CONFIG_KEYS));
+    for (const [key, line, values, restart] of rows) {
+        assert.equal(CONFIG_KEYS[key].line, line, key);
+        assert.equal(CONFIG_KEYS[key].restart, restart === 'yes', key);
+        const listed = [...values.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+        if (key === 'deck_program')
+            assert.deepEqual(listed, DECK_PROGRAMS);
+        else if (key === 'games')
+            assert.deepEqual(listed, GAMES_VALUES);
+        else if (key === 'plugins_off')
+            assert.equal(values, `a list of at most ${PLUGINS_OFF_MAX} ids `
+                + `\`${PLUGIN_ID_RE.source.slice(1, -1)}\`, written joined `
+                + 'by `,`');
+        else
+            assert.equal(values, `a number from ${SESSION_REFRESH_RANGE[0]} `
+                + `to ${SESSION_REFRESH_RANGE[1]}`);
+    }
+    const inv = section('Odoo inventory').replace(/\s+/g, ' ');
+    assert.ok(inv.includes('and nothing else: no path, no environment '
+        + 'variable, no command, no plugin to turn on'));
+});
+
+test('the contract states the config shapes of the body and the reply', () => {
+    const body = item('Odoo inventory', '`config`');
+    assert.ok(body.includes('`{"pilot": false}` from a destination that is '
+        + 'not the pilot'));
+    const pilot = configBody({pilot: true, revisionApplied: 1,
+        current: {}, result: {revision: 1, status: 'applied', at: 'x'},
+        choice: CHOICES[0]});
+    for (const key of Object.keys(pilot))
+        assert.ok(body.includes(`"${key}": `), key);
+    for (const key of Object.keys(pilot.result))
+        assert.ok(body.includes(`"${key}": `), `result.${key}`);
+    assert.ok(body.includes('"choice": "keep_local", "take_odoo" or null'));
+    assert.ok(body.includes('`choice` is the employee\'s answer to an '
+        + '`ask`, sent once, in the report that follows it'));
+    assert.ok(body.includes('a key the file lacks, or a value outside the '
+        + 'table, as null'));
+    assert.ok(body.includes('A pilot that cannot read `streamdeck.conf`, '
+        + 'though it exists, sends no `config` in that report'));
+    const reply = item('Odoo inventory', 'Reply `config`');
+    const valid = validateConfig({revision: 1, hash: 'a'.repeat(64),
+        settings: {games: 'on'}, locked: [], ask: []});
+    for (const key of Object.keys(valid).filter((k) => k !== 'ok'))
+        assert.ok(reply.includes(`"${key}": `), key);
+    assert.ok(reply.includes('`ask`, omitted when empty'));
+    assert.ok(reply.includes('A key of `locked` outside `settings`, or of '
+        + '`ask` outside `settings` or in `locked`, refuses the revision '
+        + 'with `invalid:<key>`'));
+    assert.ok(reply.includes('A `config` of another shape is ignored, as '
+        + 'if absent: nothing is announced, written or reported'));
+    const route = item('Odoo inventory', `\`POST ${REPORT_PATH}\``);
+    assert.ok(route.includes('body `protocol`, `state`, `events`, '
+        + '`lost_events`, `config`'));
+    assert.ok(route.includes('`config` for the pilot of a workstation'));
+    const state = item('Odoo inventory', '`state`');
+    assert.ok(state.includes(`\`deck_plugins\`, the ids of the deck plugins `
+        + `found on disk, sorted, at most ${DECK_PLUGINS_MAX} of the pattern `
+        + `\`${PLUGIN_ID_RE.source.slice(1, -1)}\``));
+});
+
+test('the contract states the first-pilot rule and the apply rules', () => {
+    const first = item('Odoo inventory', 'First pilot');
+    for (const fact of ['Odoo lists in `ask` the free keys whose local '
+        + 'value is not null and differs from its own, unless the '
+        + 'organisation forces the choice',
+    'the extension asks the employee to keep their settings or use '
+        + 'Odoo\'s, and sends the answer as `choice`',
+    '« Keep my settings » writes nothing',
+    'The revision answered that way comes back without `ask` when Odoo '
+        + 'adopted nothing, and is then announced again for what it still '
+        + 'offers',
+    'Locked keys are offered for the usual confirmation in every case'])
+        assert.ok(first.includes(fact), fact);
+    const click = item('Odoo inventory', 'Nothing is applied');
+    assert.ok(click.includes('without the employee\'s click'));
+    assert.ok(click.includes('`inventory-apply-request`, '
+        + '`"<destination id>:<revision>"` to apply, or '
+        + '`"<destination id>:<revision>:keep_local"`'));
+    const apply = item('Odoo inventory', 'Applying');
+    for (const fact of ['one outside the table refuses the whole revision '
+        + 'with `invalid:<key>`, and nothing is written',
+    'rewritten in one atomic replacement',
+    'every other line stays byte for byte',
+    '`games` alone restarts nothing',
+    'reported `applied` without a notification nor a restart'])
+        assert.ok(apply.includes(fact), fact);
+    const reasons = item('Odoo inventory', '`result.reason`');
+    for (const reason of ['invalid:<key>', ...REFUSAL_REASONS])
+        assert.ok(reasons.includes(`\`${reason}\``), reason);
+    assert.ok(reasons.includes('at most 256 characters'));
+    assert.ok(reasons.includes('`invalid:<key>`, `<key>` a wire key of the '
+        + 'table,'));
+    assert.ok(reasons.includes('and nothing else'));
+    const inv = section('Odoo inventory').replace(/\s+/g, ' ');
+    assert.ok(inv.includes('the GSettings key `inventory-pilot` holds, none '
+        + 'by default'));
+});
+
+test('ERPLibre finds the pilot file and the shared fixtures the contract '
+    + 'states', () => {
+    const relies = section('What ERPLibre relies on').replace(/\s+/g, ' ');
+    assert.ok(relies.includes('`$XDG_STATE_HOME/erplibre-home/pilot.json`, '
+        + 'mode 0600'));
+    assert.ok(relies.includes('`{"destination": <label>, "revision": '
+        + '<integer>, "locked": [<wire key>]}`'));
+    assert.ok(relies.includes('A missing file, or one that does not parse, '
+        + 'means that no Odoo pilots the workstation'));
+    assert.ok(relies.includes('`test/fixtures/streamdeck_conf/`'));
+    for (const part of ['`<name>.in.conf`', '`<name>.json`', '`settings`',
+        '`lines`', '`current`', '`<name>.out.conf`'])
+        assert.ok(relies.includes(part), part);
+    const dir = new URL('test/fixtures/streamdeck_conf/', ROOT);
+    const names = readdirSync(dir);
+    const cases = names.filter((f) => f.endsWith('.in.conf'));
+    assert.ok(cases.length > 0);
+    for (const f of cases) {
+        const name = f.slice(0, -'.in.conf'.length);
+        assert.ok(names.includes(`${name}.out.conf`), name);
+        assert.deepEqual(Object.keys(JSON.parse(text(
+            `test/fixtures/streamdeck_conf/${name}.json`))),
+        ['settings', 'lines', 'current'], name);
+    }
+    const reads = section('What the extension relies on')
+        .replace(/\s+/g, ' ');
+    for (const key of Object.values(CONFIG_KEYS))
+        assert.ok(reads.includes(`\`${key.line}=\``), key.line);
+    assert.ok(reads.includes('`systemctl --user restart`'));
+    assert.ok(reads.includes('`$XDG_CONFIG_HOME/erplibre-home/deck-plugins/`'));
+});

@@ -606,6 +606,10 @@ export default class ERPLibreHomePrefs extends ExtensionPreferences {
                 () => rebuild()));
             handlers.push(settings.connect('changed::instances',
                 () => add.reload()));
+            handlers.push(settings.connect('changed::inventory-pilot', () => {
+                for (const r of rows) r.syncPilot();
+                refresh();
+            }));
             return true;
         };
         follow();
@@ -639,8 +643,12 @@ export default class ERPLibreHomePrefs extends ExtensionPreferences {
      * pairing code, the key and the password are emptied once their call
      * is over, whatever its outcome. A result goes to the row's message
      * line; once the page has called `detach` (the row left the list, as
-     * on a removal), it goes to `tell(label, text)` instead. Returns
-     * `{widget, refresh, detach}`.
+     * on a removal), it goes to `tell(label, text)` instead. The « Pilot »
+     * switch makes it the one destination whose Odoo may configure the
+     * Stream Deck; its pending revision shows with « Apply », or, when Odoo
+     * asks at the first pilot report, « Use Odoo's settings » and « Keep my
+     * settings »: a click only asks the extension, which applies. Returns
+     * `{widget, refresh, detach, syncPilot}`.
      */
     _inventoryRow(inventory, dest, tell) {
         const row = new Adw.ExpanderRow({title: dest.label,
@@ -701,6 +709,60 @@ export default class ERPLibreHomePrefs extends ExtensionPreferences {
         row.add_row(actions);
         row.add_row(message);
 
+        const pilot = new Adw.SwitchRow({title: _('Pilot'),
+            subtitle: _('This Odoo may configure the Stream Deck of this '
+                + 'workstation, never without your click. One destination at '
+                + 'most.'),
+            use_markup: false, active: inventory.pilot() === dest.id});
+        let syncing = false;
+        pilot.connect('notify::active', () => {
+            if (!syncing) inventory.setPilot(dest.id, pilot.get_active());
+        });
+        const syncPilot = () => {
+            syncing = true;
+            try {
+                pilot.set_active(inventory.pilot() === dest.id);
+            } finally {
+                syncing = false;
+            }
+        };
+        row.add_row(pilot);
+
+        const config = new Adw.ActionRow({title: '', use_markup: false,
+            visible: false});
+        const button = (label, css) => new Gtk.Button({label,
+            valign: Gtk.Align.CENTER, visible: false,
+            css_classes: css ? [css] : []});
+        const applyButton = button(_('Apply'), 'suggested-action');
+        const takeButton = button(_('Use Odoo\'s settings'),
+            'suggested-action');
+        const keepButton = button(_('Keep my settings'));
+        for (const b of [applyButton, takeButton, keepButton])
+            config.add_suffix(b);
+        row.add_row(config);
+        let pendingRevision = null;
+        applyButton.connect('clicked', () =>
+            inventory.requestApply(dest.id, pendingRevision));
+        takeButton.connect('clicked', () =>
+            inventory.requestApply(dest.id, pendingRevision));
+        keepButton.connect('clicked', () =>
+            inventory.requestApply(dest.id, pendingRevision, true));
+        const showPending = p => {
+            pendingRevision = p?.revision ?? null;
+            const asking = !!p && p.ask.length > 0;
+            config.set_visible(!!p);
+            applyButton.set_visible(!!p && !asking);
+            takeButton.set_visible(asking);
+            keepButton.set_visible(asking);
+            if (!p) return;
+            config.set_title(asking
+                ? _('Odoo asks: keep your settings or use Odoo\'s? ({keys})')
+                    .replace('{keys}', p.ask.join(', '))
+                : _('Stream Deck configuration, revision {n}: {keys}')
+                    .replace('{n}', String(p.revision))
+                    .replace('{keys}', p.keys.join(', ')));
+        };
+
         const refresh = () => {
             inventory.status(dest.id).then(st => {
                 if (!st) return;
@@ -708,6 +770,8 @@ export default class ERPLibreHomePrefs extends ExtensionPreferences {
                 status.set_title(t.title);
                 status.set_subtitle(t.subtitle);
             }).catch(e => console.log(`[ERPLibreHome:prefs] ${e.message}`));
+            inventory.pendingConfig(dest.id).then(showPending)
+                .catch(e => console.log(`[ERPLibreHome:prefs] ${e.message}`));
         };
         // Runs `call()` with the buttons insensitive, then shows what
         // `said(result)` returns and the status read again.
@@ -786,7 +850,7 @@ export default class ERPLibreHomePrefs extends ExtensionPreferences {
         const detach = () => {
             attached = false;
         };
-        return {widget: row, refresh, detach};
+        return {widget: row, refresh, detach, syncPilot};
     }
 
     /**

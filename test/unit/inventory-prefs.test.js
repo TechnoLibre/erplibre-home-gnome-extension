@@ -27,6 +27,7 @@ function widgetClass(kind) {
             this.visible = props.visible ?? true;
             this.sensitive = props.sensitive ?? true;
             this.selected = props.selected ?? 0;
+            this.active = props.active ?? false;
             this.model = props.model ?? null;
             made.push(this);
         }
@@ -61,6 +62,12 @@ function widgetClass(kind) {
             this.emit('notify::selected');
         }
         set_model(m) { this.model = m; }
+        get_active() { return this.active; }
+        set_active(v) {
+            if (this.active === v) return;
+            this.active = v;
+            this.emit('notify::active');
+        }
         set_activatable_widget() {}
         add_css_class() {}
     };
@@ -225,7 +232,7 @@ test('enrolling sends the fingerprint and stores the token in the keyring',
         assert.equal(post.headers.Authorization, undefined);
         const fingerprint = createHmac('sha256', `1234|${URL_}|base`)
             .update(MACHINE_ID).digest('hex');
-        assert.deepEqual(JSON.parse(post.body), {protocol: '1.0',
+        assert.deepEqual(JSON.parse(post.body), {protocol: '1.1',
             method: 'pairing_code', fingerprint, hostname: 'deckhost',
             code: 'ABCDEFGH'});
         const [item] = keyring();
@@ -415,7 +422,7 @@ test('unenrolling revokes the token in Odoo, then forgets it', async () => {
     assert.deepEqual(await p, {ok: true, revoked: true, error: null});
     assert.equal(post.uri, `${URL_}${UNENROLL_PATH}`);
     assert.equal(post.headers.Authorization, `Bearer ${TOKEN}`);
-    assert.deepEqual(JSON.parse(post.body), {protocol: '1.0'});
+    assert.deepEqual(JSON.parse(post.body), {protocol: '1.1'});
     assert.equal(keyring().length, 0);
 });
 
@@ -828,7 +835,7 @@ test('once hidden the page holds no settings handler, shown it holds one '
         const signals = settings.handlers.slice(before).map(h => h.signal)
             .sort();
         assert.deepEqual(signals, ['changed::instances',
-            'changed::inventory-destinations']);
+            'changed::inventory-destinations', 'changed::inventory-pilot']);
         p.emit('unmap');
         assert.equal(count(), before);
     }
@@ -875,6 +882,103 @@ test('the statuses refresh every POLL_S while the page is shown', async () => {
     const before = settings.handlers.filter(h =>
         h.signal === 'changed::inventory-destinations').length;
     assert.equal(before, 0, 'no settings handler left once hidden');
+});
+
+// ------------------------------------------------- pilot and configuration
+
+/** The state file of `id` as the service writes it with a pending `offer`. */
+function writePending(id, offer) {
+    fs.mkdirSync(path.dirname(stateFile(id)), {recursive: true});
+    fs.writeFileSync(stateFile(id), JSON.stringify({
+        destination: {url: URL_, db: 'base'},
+        queue: {events: [], lost: 0},
+        status: {state: 'ok', pending: 0, lastReport: null, error: null},
+        config: {revisionApplied: 2, offer, announced: offer.revision,
+            answered: null, refused: null, result: null, choice: null},
+    }));
+}
+
+const OFFER = {revision: 3, hash: '0123456789abcdef'.repeat(4),
+    settings: {deck_program: 'controller', games: 'off'}, locked: ['games'],
+    ask: [], keys: ['deck_program', 'games']};
+const ASKING = {...OFFER, settings: {session_refresh_sec: 2}, locked: [],
+    ask: ['session_refresh_sec'], keys: ['session_refresh_sec']};
+
+const pilotSwitch = row => find(row, 'Adw.SwitchRow', 'Pilot');
+
+test('checking_pilot_unchecks_the_others', async () => {
+    setDestinations([dest(), dest({id: 'd2', label: 'Branch', db: 'other'})]);
+    const p = page();
+    const [one, two] = ['Head office', 'Branch'].map(t =>
+        pilotSwitch(find(p, 'Adw.ExpanderRow', t)));
+    assert.deepEqual([one.active, two.active], [false, false],
+        'no pilot by default');
+    one.set_active(true);
+    assert.equal(settings.get_string('inventory-pilot'), 'd1');
+    two.set_active(true);
+    assert.equal(settings.get_string('inventory-pilot'), 'd2');
+    assert.deepEqual([one.active, two.active], [false, true]);
+    two.set_active(false);
+    assert.equal(settings.get_string('inventory-pilot'), '');
+    settings.set_string('inventory-pilot', 'd1');
+    assert.deepEqual([one.active, two.active], [true, false],
+        'the switches follow the settings');
+});
+
+test('apply_button_writes_the_request', async () => {
+    setDestinations([dest()]);
+    settings.set_string('inventory-pilot', 'd1');
+    writePending('d1', OFFER);
+    const p = page();
+    await settle(40);
+    const row = find(p, 'Adw.ExpanderRow', 'Head office');
+    const apply = find(row, 'Gtk.Button', 'Apply');
+    assert.equal(apply.visible, true);
+    assert.equal(showing(row, 'deck_program, games').length, 1,
+        'the keys that change are listed');
+    assert.equal(settings.get_string('inventory-apply-request'), '');
+    apply.emit('clicked');
+    assert.equal(settings.get_string('inventory-apply-request'), 'd1:3');
+});
+
+test('ask_shows_use_odoo_and_keep_buttons', async () => {
+    setDestinations([dest()]);
+    settings.set_string('inventory-pilot', 'd1');
+    writePending('d1', ASKING);
+    const p = page();
+    await settle(40);
+    const row = find(p, 'Adw.ExpanderRow', 'Head office');
+    assert.equal(find(row, 'Gtk.Button', 'Apply').visible, false);
+    assert.equal(find(row, 'Gtk.Button', 'Use Odoo\'s settings').visible,
+        true);
+    assert.equal(find(row, 'Gtk.Button', 'Keep my settings').visible, true);
+    find(row, 'Gtk.Button', 'Use Odoo\'s settings').emit('clicked');
+    assert.equal(settings.get_string('inventory-apply-request'), 'd1:3');
+});
+
+test('keep_button_writes_the_keep_local_request', async () => {
+    setDestinations([dest()]);
+    settings.set_string('inventory-pilot', 'd1');
+    writePending('d1', ASKING);
+    const p = page();
+    await settle(40);
+    find(p, 'Gtk.Button', 'Keep my settings').emit('clicked');
+    assert.equal(settings.get_string('inventory-apply-request'),
+        'd1:3:keep_local');
+});
+
+test('only the pilot shows a pending configuration', async () => {
+    setDestinations([dest()]);
+    writePending('d1', OFFER);
+    const p = page();
+    await settle(40);
+    for (const label of ['Apply', 'Use Odoo\'s settings', 'Keep my settings'])
+        assert.equal(find(p, 'Gtk.Button', label).visible, false, label);
+    writePending('d1', {...OFFER, revision: 2});
+    settings.set_string('inventory-pilot', 'd1');
+    await settle(40);
+    assert.equal(find(p, 'Gtk.Button', 'Apply').visible, false,
+        'a revision already applied is not pending');
 });
 
 // ------------------------------------------------------------ translations
