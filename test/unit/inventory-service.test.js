@@ -1563,9 +1563,12 @@ test('keep_local_writes_nothing_and_reports_the_choice', async () => {
     assert.equal(h.calls.length, 2, 'the choice goes at once');
     assert.equal(h.calls[1].body.config.choice, 'keep_local');
     assert.equal(h.calls[1].body.config.result, null);
+    assert.equal(h.calls[1].body.config.revision_applied, null,
+        'a revision kept is not one applied');
     await reply(1, ok());
     const next = await heartbeat();
     assert.equal(next.body.config.choice, null, 'sent once');
+    assert.equal(next.body.config.revision_applied, null);
 });
 
 test('locked_keys_still_need_the_usual_apply_after_keep_local', async () => {
