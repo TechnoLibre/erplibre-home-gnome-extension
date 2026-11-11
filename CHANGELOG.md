@@ -12,7 +12,8 @@ migrations that are not auto-applied.
   of settings an Odoo may set (`deck_program`, `plugins_off`,
   `session_refresh_sec`, `games`), the validation of the `config` of a
   report reply (a value outside the schema refuses the whole revision
-  with `invalid:<key>`), the reading of the local values of
+  with `invalid:<key>`, the only refusal reason of a revision; a
+  `config` of another shape is ignored), the reading of the local values of
   `streamdeck.conf` as the deck's settings library reads them (a key the
   file lacks reads null: nothing local to keep), and its
   rewrite by the rule of ERPLibre's writer, byte for byte outside the

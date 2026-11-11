@@ -104,25 +104,64 @@ test('a_bad_value_refuses_the_whole_revision', () => {
     }
 });
 
-test('a reply outside the shape refuses, naming the part', () => {
-    const settings = {games: 'on'};
-    for (const [config, reason, revision] of [
-        [null, 'invalid:config', null], ['x', 'invalid:config', null],
-        [[], 'invalid:config', null],
-        [reply(settings, {revision: -1}), 'invalid:revision', null],
-        [reply(settings, {revision: 1.5}), 'invalid:revision', null],
-        [reply(settings, {revision: '3'}), 'invalid:revision', null],
-        [reply(settings, {hash: 'A'.repeat(64)}), 'invalid:hash', 3],
-        [reply(settings, {hash: 'a'.repeat(63)}), 'invalid:hash', 3],
-        [reply(null), 'invalid:settings', 3],
-        [reply(['games']), 'invalid:settings', 3],
-        [reply(settings, {locked: 'games'}), 'invalid:locked', 3],
-        [reply(settings, {locked: [1]}), 'invalid:locked', 3],
-        [reply(settings, {locked: ['deck_program']}), 'invalid:locked', 3],
-        [reply(settings, {ask: 'games'}), 'invalid:ask', 3],
-    ]) {
+// The frame of a reply's `config`, malformed: no key of the table is at
+// fault, so there is no `invalid:<key>` to send, the one refusal reason
+// of a revision Odoo receives. The config is ignored as if absent.
+const FRAMES = [null, 'x', [],
+    reply({games: 'on'}, {revision: -1}), reply({games: 'on'}, {revision: 1.5}),
+    reply({games: 'on'}, {revision: '3'}),
+    reply({games: 'on'}, {hash: 'A'.repeat(64)}),
+    reply({games: 'on'}, {hash: 'a'.repeat(63)}),
+    reply(null), reply(['games']),
+    reply({games: 'on'}, {locked: 'games'}),
+    reply({games: 'on'}, {locked: [1]}),
+    reply({games: 'on'}, {ask: 'games'}),
+    reply({games: 'on'}, {ask: ['games', 1]}),
+    // The frame goes first: a bad value besides changes nothing.
+    reply({games: 'yes'}, {hash: 'x'})];
+
+test('a reply outside the shape is ignored, nothing to refuse', () => {
+    for (const config of FRAMES) {
         assert.deepEqual(validateConfig(config),
-            {ok: false, reason, revision}, JSON.stringify(config));
+            {ok: false, reason: null, revision: null},
+            JSON.stringify(config));
+    }
+});
+
+test('a key locked or asked out of place refuses as invalid:<key>', () => {
+    const settings = {deck_program: 'tiler', games: 'off'};
+    assert.deepEqual(validateConfig(reply(settings,
+        {locked: ['session_refresh_sec']})),
+    {ok: false, reason: 'invalid:session_refresh_sec', revision: 3});
+    // The first key at fault in the table's order, whatever Odoo's order.
+    assert.deepEqual(validateConfig(reply(settings,
+        {locked: ['games', 'plugins_off'], ask: ['games']})),
+    {ok: false, reason: 'invalid:plugins_off', revision: 3});
+    assert.deepEqual(validateConfig(reply(settings,
+        {locked: ['games'], ask: ['games', 'deck_program', 'plugins_off']})),
+    {ok: false, reason: 'invalid:plugins_off', revision: 3});
+    assert.deepEqual(validateConfig(reply(settings,
+        {locked: ['deck_program', 'plugins_off'], ask: ['deck_program']})),
+    {ok: false, reason: 'invalid:deck_program', revision: 3});
+});
+
+// Odoo answers 400 to a `result.reason` outside the contract's list, and
+// the report then never goes through: a refusal names a key of the table.
+test('every refusal names a key of the table, as Odoo receives it', () => {
+    const named = new RegExp(`^invalid:(${Object.keys(CONFIG_KEYS)
+        .join('|')})$`);
+    const others = {deck_program: 'controller', games: 'off'};
+    const configs = [...FRAMES,
+        ...Object.entries(BAD).flatMap(([key, values]) =>
+            values.map(value => reply({...others, [key]: value}))),
+        ...Object.keys(CONFIG_KEYS).flatMap(key => [
+            reply(others, {locked: [key]}), reply(others, {ask: [key]}),
+            reply(others, {locked: [key], ask: [key]})])];
+    for (const config of configs) {
+        const r = validateConfig(config);
+        if (r.ok || r.reason === null) continue;
+        assert.match(r.reason, named, JSON.stringify(config));
+        assert.ok(Number.isSafeInteger(r.revision), JSON.stringify(config));
     }
 });
 
@@ -145,10 +184,10 @@ test('a valid reply comes back normalised, unknown keys ignored', () => {
 
 test('an_ask_key_outside_the_free_keys_refuses', () => {
     const settings = {deck_program: 'tiler', games: 'off'};
-    for (const ask of [['session_refresh_sec'], ['games'], ['games', 1]]) {
+    for (const key of ['session_refresh_sec', 'games']) {
         assert.deepEqual(validateConfig(reply(settings,
-            {locked: ['games'], ask})),
-        {ok: false, reason: 'invalid:ask', revision: 3}, String(ask));
+            {locked: ['games'], ask: [key]})),
+        {ok: false, reason: `invalid:${key}`, revision: 3}, key);
     }
     assert.deepEqual(validateConfig(reply(settings,
         {locked: ['games'], ask: ['deck_program', 'key_layouts']})).ask,

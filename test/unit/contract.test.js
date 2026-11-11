@@ -514,8 +514,11 @@ test('the contract states the config shapes of the body and the reply', () => {
     for (const key of Object.keys(valid).filter((k) => k !== 'ok'))
         assert.ok(reply.includes(`"${key}": `), key);
     assert.ok(reply.includes('`ask`, omitted when empty'));
-    assert.ok(reply.includes('A key of `ask` outside `settings`, or in '
-        + '`locked`, refuses the revision'));
+    assert.ok(reply.includes('A key of `locked` outside `settings`, or of '
+        + '`ask` outside `settings` or in `locked`, refuses the revision '
+        + 'with `invalid:<key>`'));
+    assert.ok(reply.includes('A `config` of another shape is ignored, as '
+        + 'if absent: nothing is announced, written or reported'));
     const route = item('Odoo inventory', `\`POST ${REPORT_PATH}\``);
     assert.ok(route.includes('body `protocol`, `state`, `events`, '
         + '`lost_events`, `config`'));
@@ -553,6 +556,9 @@ test('the contract states the first-pilot rule and the apply rules', () => {
     for (const reason of ['invalid:<key>', ...REFUSAL_REASONS])
         assert.ok(reasons.includes(`\`${reason}\``), reason);
     assert.ok(reasons.includes('at most 256 characters'));
+    assert.ok(reasons.includes('`invalid:<key>`, `<key>` a wire key of the '
+        + 'table,'));
+    assert.ok(reasons.includes('and nothing else'));
     const inv = section('Odoo inventory').replace(/\s+/g, ' ');
     assert.ok(inv.includes('the GSettings key `inventory-pilot` holds, none '
         + 'by default'));

@@ -298,8 +298,13 @@ command, no plugin to turn on.
   `settings` are Odoo's values of the keys a layer sets; `locked` the
   keys the manager locked; `ask`, omitted when empty, the free keys
   whose local value Odoo asks the employee to keep or replace. A key of
-  `ask` outside `settings`, or in `locked`, refuses the revision; a key
-  unknown to this table is ignored.
+  `locked` outside `settings`, or of `ask` outside `settings` or in
+  `locked`, refuses the revision with `invalid:<key>`; a key unknown to
+  this table is ignored. A `config` of another shape is ignored, as if
+  absent: nothing is announced, written or reported, since no key of
+  the table is at fault (`revision` not a non-negative integer, `hash`
+  not 64 lowercase hex digits, `settings` not an object, `locked` or
+  `ask` not a list of texts).
 - First pilot: at the first pilot report of a workstation, Odoo lists in
   `ask` the free keys whose local value is not null and differs from its
   own, unless the organisation forces the choice; the extension asks the
@@ -321,10 +326,10 @@ command, no plugin to turn on.
   active, it is restarted; `games` alone restarts nothing. A revision
   whose values the file already holds is reported `applied` without a
   notification nor a restart.
-- `result.reason` of a refusal is `invalid:<key>`, `write_failed`,
-  `restart_failed` or `unit_missing` (the program changed while no unit
-  is installed: the file is written all the same), at most 256
-  characters.
+- `result.reason` of a refusal is `invalid:<key>`, `<key>` a wire key
+  of the table, `write_failed`, `restart_failed` or `unit_missing` (the
+  program changed while no unit is installed: the file is written all
+  the same), at most 256 characters, and nothing else.
 - `pilot.json` (item 8 of What ERPLibre relies on) names the pilot's
   label, the revision received last and its `locked` keys.
 

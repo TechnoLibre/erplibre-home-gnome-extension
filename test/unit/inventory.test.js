@@ -648,6 +648,12 @@ test('parseReply validates the config a reply carries', () => {
     assert.deepEqual(bad, {ok: true, accepted: ['a'], heartbeatS: 900,
         error: null, config: {ok: false, reason: 'invalid:deck_program',
             revision: 2}});
+    // A config outside the shape names nothing to refuse: it is ignored,
+    // the report and its events still go through.
+    assert.deepEqual(parseReply(200, {accepted: ['a'],
+        config: {...config, hash: 'B'.repeat(64)}}),
+    {ok: true, accepted: ['a'], heartbeatS: 900, error: null,
+        config: {ok: false, reason: null, revision: null}});
     assert.equal(parseReply(200, {accepted: [], config: null}).config, null);
     assert.equal(parseReply(401, {error: 'token_invalid', config}).config,
         null);
