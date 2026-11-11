@@ -506,6 +506,8 @@ test('the contract states the config shapes of the body and the reply', () => {
     assert.ok(body.includes('"choice": "keep_local", "take_odoo" or null'));
     assert.ok(body.includes('`choice` is the employee\'s answer to an '
         + '`ask`, sent once, in the report that follows it'));
+    assert.ok(body.includes('a key the file lacks, or a value outside the '
+        + 'table, as null'));
     const reply = item('Odoo inventory', 'Reply `config`');
     const valid = validateConfig({revision: 1, hash: 'a'.repeat(64),
         settings: {games: 'on'}, locked: [], ask: []});

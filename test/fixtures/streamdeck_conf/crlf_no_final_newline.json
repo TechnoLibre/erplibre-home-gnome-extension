@@ -12,7 +12,7 @@
   },
   "current": {
     "deck_program": null,
-    "plugins_off": [],
+    "plugins_off": null,
     "session_refresh_sec": 5,
     "games": null
   }

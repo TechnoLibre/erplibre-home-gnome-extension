@@ -271,9 +271,11 @@ route.
   null, "choice": "keep_local", "take_odoo" or null}`, where `<result>`
   is `{"revision": <integer>, "status": "applied" or "refused",
   "reason": <text> or null, "at": <ISO 8601>}`. `current` holds every
-  key of the table of **Odoo configuration** below as the file gives it,
-  a value outside the table as null. `result` says what became of the
-  last revision received, until a report carrying it is answered 200.
+  key of the table of **Odoo configuration** below as the file gives it:
+  a key the file lacks, or a value outside the table, as null, which
+  holds nothing local to keep (the deck runs its default). `result` says
+  what became of the last revision received, until a report carrying it
+  is answered 200.
   `choice` is the employee's answer to an `ask`, sent once, in the
   report that follows it.
 

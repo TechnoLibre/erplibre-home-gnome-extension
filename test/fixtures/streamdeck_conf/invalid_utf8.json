@@ -8,12 +8,12 @@
     "GAMES": "on"
   },
   "current": {
-    "deck_program": "tiler",
+    "deck_program": null,
     "plugins_off": [
       "sound",
       "timers"
     ],
-    "session_refresh_sec": 1,
+    "session_refresh_sec": null,
     "games": null
   }
 }

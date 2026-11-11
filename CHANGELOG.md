@@ -13,7 +13,8 @@ migrations that are not auto-applied.
   `session_refresh_sec`, `games`), the validation of the `config` of a
   report reply (a value outside the schema refuses the whole revision
   with `invalid:<key>`), the reading of the local values of
-  `streamdeck.conf` as the deck's settings library reads them, and its
+  `streamdeck.conf` as the deck's settings library reads them (a key the
+  file lacks reads null: nothing local to keep), and its
   rewrite by the rule of ERPLibre's writer, byte for byte outside the
   managed lines. The fixtures of `test/fixtures/streamdeck_conf/` are
   shared with ERPLibre.

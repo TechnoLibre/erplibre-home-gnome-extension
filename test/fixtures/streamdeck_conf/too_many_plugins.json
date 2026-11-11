@@ -8,9 +8,9 @@
     "DECK_PLUGINS_OFF": "p1"
   },
   "current": {
-    "deck_program": "tiler",
+    "deck_program": null,
     "plugins_off": null,
     "session_refresh_sec": 60,
-    "games": "on"
+    "games": null
   }
 }

@@ -160,13 +160,25 @@ test('readCurrent_matches_the_settings_library', () => {
     assert.ok(all.length >= 6, `${all.length} fixtures`);
     for (const f of all)
         assert.deepEqual(readCurrent(f.before), f.current, f.name);
-    // A missing file reads as the library's defaults.
-    assert.deepEqual(readCurrent(null), {deck_program: 'tiler',
-        plugins_off: [], session_refresh_sec: 1, games: 'on'});
     // A text reads as its bytes would.
     assert.deepEqual(readCurrent('GAMES=off\nDECK_PROGRAM=none\r\n'),
-        {deck_program: null, plugins_off: [], session_refresh_sec: 1,
+        {deck_program: null, plugins_off: null, session_refresh_sec: null,
             games: 'off'});
+});
+
+// A key the file lacks is no value of the employee's: the deck runs the
+// library's default, but nothing local is there to keep. It reads null,
+// which Odoo neither lists in `ask` nor adopts.
+test('a_key_the_file_lacks_reads_null', () => {
+    const none = {deck_program: null, plugins_off: null,
+        session_refresh_sec: null, games: null};
+    assert.deepEqual(readCurrent(null), none);
+    assert.deepEqual(readCurrent(''), none);
+    assert.deepEqual(readCurrent(new Uint8Array(0)), none);
+    assert.deepEqual(readCurrent('# GAMES=on\nINVENTED=1\n'), none);
+    assert.deepEqual(readCurrent('GAMES=on\n'), {...none, games: 'on'});
+    // An empty list is a value: the line is there.
+    assert.deepEqual(readCurrent('DECK_PLUGINS_OFF=\n').plugins_off, []);
 });
 
 test('readCurrent reads numbers and lists as the shell does', () => {

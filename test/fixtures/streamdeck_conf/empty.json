@@ -12,9 +12,9 @@
     "GAMES": "off"
   },
   "current": {
-    "deck_program": "tiler",
-    "plugins_off": [],
-    "session_refresh_sec": 1,
-    "games": "on"
+    "deck_program": null,
+    "plugins_off": null,
+    "session_refresh_sec": null,
+    "games": null
   }
 }

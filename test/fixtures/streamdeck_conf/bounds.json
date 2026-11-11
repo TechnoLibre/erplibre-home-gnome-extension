@@ -6,7 +6,7 @@
     "DECK_PROGRAM": "controller"
   },
   "current": {
-    "deck_program": "tiler",
+    "deck_program": null,
     "plugins_off": [
       "p0",
       "p1",
@@ -74,6 +74,6 @@
       "p63"
     ],
     "session_refresh_sec": 0.5,
-    "games": "on"
+    "games": null
   }
 }

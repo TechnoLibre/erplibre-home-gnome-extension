@@ -9,8 +9,8 @@
   },
   "current": {
     "deck_program": "none",
-    "plugins_off": [],
-    "session_refresh_sec": 1,
+    "plugins_off": null,
+    "session_refresh_sec": null,
     "games": "on"
   }
 }
