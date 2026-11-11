@@ -309,7 +309,9 @@ command, no plugin to turn on.
   `ask` the free keys whose local value is not null and differs from its
   own, unless the organisation forces the choice; the extension asks the
   employee to keep their settings or use Odoo's, and sends the answer as
-  `choice`. « Keep my settings » writes nothing. Locked keys are offered
+  `choice`. « Keep my settings » writes nothing. The revision answered
+  that way comes back without `ask` when Odoo adopted nothing, and is
+  then announced again for what it still offers. Locked keys are offered
   for the usual confirmation in every case.
 - Nothing is applied without the employee's click: a notification, an
   entry of the deck menu and a button of the preferences announce each

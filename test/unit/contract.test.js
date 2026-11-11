@@ -537,6 +537,9 @@ test('the contract states the first-pilot rule and the apply rules', () => {
     'the extension asks the employee to keep their settings or use '
         + 'Odoo\'s, and sends the answer as `choice`',
     '« Keep my settings » writes nothing',
+    'The revision answered that way comes back without `ask` when Odoo '
+        + 'adopted nothing, and is then announced again for what it still '
+        + 'offers',
     'Locked keys are offered for the usual confirmation in every case'])
         assert.ok(first.includes(fact), fact);
     const click = item('Odoo inventory', 'Nothing is applied');

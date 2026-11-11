@@ -1633,6 +1633,36 @@ test('the_question_is_asked_once_per_revision', async () => {
     assert.deepEqual(h.announced[0].ask, ['session_refresh_sec']);
 });
 
+test('an_answer_odoo_settles_without_a_new_revision_is_announced',
+    async () => {
+        // Odoo takes the choice and adopts nothing (the local value became
+        // Odoo's meanwhile, or the policy is forced): the same revision
+        // comes back without ask, and its locked keys are offered.
+        await piloted({conf: `${CONF}DECK_SESSION_REFRESH_SEC=5\n`});
+        const settings = {session_refresh_sec: 2, plugins_off: ['sound']};
+        const asking = config(3, settings, {locked: ['plugins_off'],
+            ask: ['session_refresh_sec']});
+        await offer(0, asking);
+        assert.equal(await h.service.keepLocal('d1', 3), true);
+        await settle(40);
+        // A reply still asking, sent before the answer reached Odoo.
+        await offer(1, asking);
+        assert.equal(h.announced.length, 1, 'answered: not asked again');
+        assert.equal(h.service.pendingConfig(), null);
+        await heartbeat();
+        await offer(2, config(3, settings, {locked: ['plugins_off']}));
+        assert.deepEqual(h.announced.map(p => [p.revision, p.keys, p.ask]), [
+            [3, ['plugins_off', 'session_refresh_sec'],
+                ['session_refresh_sec']],
+            [3, ['plugins_off', 'session_refresh_sec'], []]]);
+        assert.equal(h.service.pendingConfig().revision, 3);
+        assert.equal(await h.service.keepLocal('d1', 3), false);
+        const r = await h.service.applyConfig('d1', 3);
+        assert.equal(r.status, 'applied');
+        assert.match(confText(), /^DECK_PLUGINS_OFF=sound$/m);
+        assert.match(confText(), /^DECK_SESSION_REFRESH_SEC=2$/m);
+    });
+
 test('apply_writes_then_restarts_an_active_unit', async () => {
     await piloted();
     fs.chmodSync(confPath(), 0o640);
