@@ -225,6 +225,24 @@ test('rewriteConf on a text gives a text, a missing file a new one', () => {
     assert.equal(rewriteConf('X=1', {}), 'X=1\n');
 });
 
+// Read as empty, a file of another type would come back as the managed
+// lines alone, every other line of the employee's lost at the write.
+test('a file neither bytes nor text throws, never reads as empty', () => {
+    const text = '# keep me\nINVENTED=1\nGAMES=on\n';
+    const bytes = new TextEncoder().encode(text);
+    for (const input of [bytes.buffer, new DataView(bytes.buffer),
+        new Uint16Array(2), undefined, 0, {}, [text],
+        {get_data: () => bytes}]) {
+        const what = Object.prototype.toString.call(input);
+        assert.throws(() => rewriteConf(input, {games: 'off'}), TypeError,
+            what);
+        assert.throws(() => readCurrent(input), TypeError, what);
+    }
+    // A Buffer is a Uint8Array.
+    assert.equal(Buffer.from(rewriteConf(Buffer.from(bytes), {games: 'off'}))
+        .toString(), '# keep me\nINVENTED=1\nGAMES=off\n');
+});
+
 test('changedKeys compares values, lists in their order', () => {
     const current = {deck_program: 'tiler', plugins_off: ['a', 'b'],
         session_refresh_sec: 2, games: null};
