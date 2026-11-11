@@ -90,8 +90,11 @@ function harness({dests = [D1], tokens = {d1: TOKEN}, start = true,
             return h.factsHang ? new Promise(() => {})
                 : Promise.resolve({...h.facts});
         },
-        readServiceState: cancellable => {
+        // `h.serviceUnreadable`: systemctl failed, the caller's
+        // `unreadable` comes back, as from the real reading.
+        readServiceState: (cancellable, unreadable = 'absent') => {
             h.serviceReads.push(cancellable);
+            if (h.serviceUnreadable) return Promise.resolve(unreadable);
             return h.serviceHang ? new Promise(() => {})
                 : Promise.resolve(h.serviceState);
         },
@@ -1344,6 +1347,8 @@ test('readServiceState asks systemd about the deck unit', async () => {
         'erplibre-home-streamdeck.service']);
     fake.onSpawn = () => ({exit: 1});
     assert.equal(await svc.readServiceState(), 'absent');
+    assert.equal(await svc.readServiceState(null, null), null,
+        'unreadable: what the caller asks for');
 });
 
 // ------------------------------------------------- deck plugins on disk
@@ -1664,6 +1669,44 @@ test('an_inactive_unit_is_not_started', async () => {
     assert.match(confText(), /^DECK_PROGRAM=controller$/m);
     assert.deepEqual(fake.spawned.filter(s => s.argv[0] === 'systemctl'),
         [], 'neither restarted nor started');
+});
+
+test('a_failed_unit_is_not_started', async () => {
+    await piloted();
+    h.serviceState = 'failed';
+    await offer(0, config(3, {deck_program: 'controller'}));
+    const r = await h.service.applyConfig('d1', 3);
+    assert.equal(r.status, 'applied');
+    assert.match(confText(), /^DECK_PROGRAM=controller$/m);
+    assert.deepEqual(restarts(), [], 'left to systemd, not started');
+});
+
+test('an_unreadable_unit_state_starts_nothing', async () => {
+    await piloted();
+    await offer(0, config(3, {deck_program: 'controller'}));
+    h.serviceUnreadable = true;
+    const r = await h.service.applyConfig('d1', 3);
+    assert.deepEqual(r, {revision: 3, status: 'refused',
+        reason: 'restart_failed', at: h.now});
+    assert.match(confText(), /^DECK_PROGRAM=controller$/m, 'written');
+    assert.deepEqual(restarts(), []);
+});
+
+test('a_unit_state_past_the_deadline_starts_nothing', async () => {
+    await piloted();
+    await offer(0, config(3, {plugins_off: ['sound']}));
+    h.serviceHang = true;
+    let result = null;
+    h.service.applyConfig('d1', 3).then(r => {
+        result = r;
+    });
+    await settle(60);
+    assert.equal(result, null, 'the state reading hangs');
+    for (const t of live().filter(t => t.ms === TIMEOUT_S * 1000)) fire(t);
+    await settle(40);
+    assert.deepEqual(result, {revision: 3, status: 'refused',
+        reason: 'restart_failed', at: h.now});
+    assert.deepEqual(restarts(), []);
 });
 
 test('a_missing_unit_refuses_unit_missing_after_writing', async () => {
