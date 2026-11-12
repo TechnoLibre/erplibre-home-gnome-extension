@@ -17,7 +17,10 @@ migrations that are not auto-applied.
   checked against the format and the catalog when it comes and at the
   click (`invalid:key_layouts` otherwise), then `keymap.json` is written,
   mode 0644, after `streamdeck.conf`, which is put back when it cannot
-  be, before one restart of the deck unit. The fixtures of
+  be, before one restart of the deck unit. Only the models of
+  `key_layouts` are replaced: the file's layouts of the other models
+  stay as they are, and a `keymap.json` that cannot be read is not
+  written over. The fixtures of
   `test/fixtures/keymap/` are shared with ERPLibre.
 - Odoo configuration, applied: a destination switched on as **Pilot** in
   the preferences (one at most, none by default) may configure the

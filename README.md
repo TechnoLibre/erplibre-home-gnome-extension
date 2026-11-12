@@ -193,7 +193,8 @@ commit changes. A layout whose action, icon or key the catalog does not
 allow, or that names a plugin turned off, refuses the revision; once
 clicked, `~/.config/erplibre-home/keymap.json` is written with
 `streamdeck.conf`, both or neither, before one restart of the deck
-service, which reads it at its start.
+service, which reads it at its start. Only the models Odoo lays out are
+replaced there: the layout of another model, edited by hand, stays.
 
 ## Icon badges
 

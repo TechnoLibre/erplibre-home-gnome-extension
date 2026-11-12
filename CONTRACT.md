@@ -404,11 +404,19 @@ no path, no environment variable, no command, no plugin to turn on.
   local values and still asked: it writes nothing. One outside them
   refuses the revision with `invalid:key_layouts`, and nothing is
   written; no catalog read refuses every layout. `keymap.json`
-  is then written whole, the revision and its layouts, after
-  `streamdeck.conf`: when it cannot be written, `streamdeck.conf` is put
+  is then rewritten, the revision and its layouts, after
+  `streamdeck.conf`: the layouts of `key_layouts` replace those of their
+  models, and the file's layouts of the other models (each an object
+  nesting 8 levels at most) are kept as they are, 16 models at most,
+  those of `key_layouts` first, then the file's in order: a layout Odoo
+  does not send stays the employee's. A `keymap.json` that exists but
+  cannot be read refuses the revision `write_failed` before any write.
+  When it cannot be written, `streamdeck.conf` is put
   back as it was (removed when it did not exist) and the revision refused
   `write_failed`. A change of either restarts the unit once. A
-  `keymap.json` whose layouts hash as the revision's holds them already.
+  `keymap.json` holds the revision's layouts already when each model of
+  `key_layouts` hashes there as the revision's, whatever its other
+  models.
 - `result.reason` of a refusal is `invalid:<key>`, `<key>` a wire key
   of the table, `write_failed`, `restart_failed` or `unit_missing` (the
   program changed while no unit is installed: the file is written all
@@ -478,7 +486,8 @@ file's version moves with it.
 - **1.4:** the key layouts, protocol 1.2: the state carries
   `deck_catalog`, the output of the deck program's `--catalog`; the
   pilot reports the hashes of `keymap.json` and writes it from
-  `key_layouts`; the keymap fixtures are shared with ERPLibre.
+  `key_layouts`, keeping its layouts of the models Odoo does not send;
+  the keymap fixtures are shared with ERPLibre.
 
 - **1.3:** the Odoo configuration, protocol 1.1: the report carries
   `config` and `state.deck_plugins`, the pilot destination receives a

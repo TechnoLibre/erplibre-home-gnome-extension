@@ -2344,11 +2344,51 @@ test('apply writes keymap.json, 0644, with the revision and the layouts',
             {'0084': layoutHash(LAYOUTS['0084'])}, 'the file read again');
         // A keymap.json of another mode becomes 0644 too.
         fs.chmodSync(keymapPath(), 0o600);
-        await offer(1, config(4, {key_layouts: {}}));
+        const tiles = {'0084': {keys: [{key: 0, action: 'tiles'}]}};
+        await offer(1, config(4, {key_layouts: tiles}));
         await h.service.applyConfig('d1', 4);
         assert.equal(fs.statSync(keymapPath()).mode & 0o777, 0o644);
-        assert.deepEqual(readKeymap().layouts, {});
+        assert.deepEqual(readKeymap().layouts, tiles);
     });
+
+test('apply keeps the keymap.json layout of a model Odoo does not send',
+    async () => {
+        // A layout Odoo adopted as kept in the file, or one no layer lays
+        // out, stays the employee's while Odoo lays out another model.
+        const mine = {keys: [{key: 0, action: 'empty', label: 'mine'}]};
+        writeKeymap(JSON.stringify({format: 1, revision: 1,
+            layouts: {'006d': mine, '0084': {keys: []}}}));
+        await piloted();
+        await offer(0, config(3, {games: 'on', key_layouts: LAYOUTS}));
+        assert.deepEqual(h.announced.map(p => p.keys), [['key_layouts']]);
+        await h.service.applyConfig('d1', 3);
+        assert.deepEqual(readKeymap(), {format: 1, revision: 3,
+            layouts: {'006d': mine, '0084': LAYOUTS['0084']}});
+        // Odoo sending that model alone, as the file holds it, changes
+        // nothing.
+        await settle(40);
+        await offer(1, config(4, {games: 'on', key_layouts: LAYOUTS}));
+        assert.equal(h.announced.length, 1, 'held already: not announced');
+        assert.deepEqual(readKeymap().layouts['006d'], mine);
+    });
+
+test('a keymap.json that cannot be read is not written over', async () => {
+    // What it holds of the employee's is unknown: written whole, it would
+    // be lost.
+    writeKeymap(JSON.stringify({format: 1, revision: 1, layouts: {}}));
+    await piloted();
+    const before = confText();
+    fs.chmodSync(keymapPath(), 0o000);
+    try {
+        await offer(0, config(3, {games: 'off', key_layouts: LAYOUTS}));
+        const r = await h.service.applyConfig('d1', 3);
+        assert.deepEqual([r.status, r.reason], ['refused', 'write_failed']);
+        assert.equal(confText(), before, 'nothing written');
+    } finally {
+        fs.chmodSync(keymapPath(), 0o644);
+    }
+    assert.deepEqual(readKeymap().layouts, {});
+});
 
 test('a keymap.json that holds the layouts is applied silently', async () => {
     writeKeymap(keymapText(1, LAYOUTS));

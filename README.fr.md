@@ -201,7 +201,8 @@ catalogue ne permet pas l'action, l'icône ou la touche, ou qui nomme un
 plugin coupé, refuse la révision ; au clic,
 `~/.config/erplibre-home/keymap.json` est écrit avec `streamdeck.conf`,
 les deux ou aucun, avant un seul redémarrage du service du deck, qui le
-lit à son démarrage.
+lit à son démarrage. Seuls les modèles qu'Odoo dispose y sont remplacés :
+la disposition d'un autre modèle, éditée à la main, reste.
 
 ## Pastilles de comptage
 

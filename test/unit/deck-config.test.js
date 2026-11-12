@@ -576,12 +576,47 @@ test('changedKeys compares the layouts by their hashes', () => {
     const swapped = {'0084': {keys: [...LAYOUTS['0084'].keys].reverse()}};
     assert.deepEqual(changedKeys(held, {key_layouts: swapped}),
         ['key_layouts']);
-    assert.deepEqual(changedKeys(held, {key_layouts: {}}), ['key_layouts'],
-        'a model the file holds and Odoo no longer sends');
+    // Only the models Odoo sends count: the file's other layouts stay
+    // the employee's.
+    assert.deepEqual(changedKeys(held, {key_layouts: {}}), [],
+        'a model the file holds and Odoo does not send');
+    assert.deepEqual(changedKeys({...held, key_layouts: {...held.key_layouts,
+        '006d': 'f'.repeat(64)}}, {key_layouts: LAYOUTS}), []);
     assert.deepEqual(changedKeys({...held, key_layouts: null},
-        {key_layouts: {}}), ['key_layouts'], 'no file is not an empty one');
+        {key_layouts: LAYOUTS}), ['key_layouts'], 'no file holds none');
     assert.deepEqual(changedKeys(held, {key_layouts: {...LAYOUTS,
         '006d': {keys: []}}}), ['key_layouts']);
+});
+
+test('keymapText keeps the layouts of the models Odoo does not send', () => {
+    const mine = {keys: [{key: 4, action: 'tiles', label: 'à moi'}],
+        note: 'hand made'};
+    const file = `${JSON.stringify({format: 1, revision: 2, layouts: {
+        '0084': {keys: []}, '006d': mine, 'ABCD': {keys: []},
+        '0063': [], '0090': {keys: 'x'}}}, null, 4)}\n`;
+    const written = JSON.parse(keymapText(5, LAYOUTS, file));
+    assert.deepEqual(written, {format: 1, revision: 5, layouts: {
+        '006d': mine, '0084': LAYOUTS['0084'], '0090': {keys: 'x'}}},
+    'Odoo\'s model replaced, the hashed layouts of the others kept as'
+        + ' they are, a name or a layout without a hash dropped');
+    assert.equal(layoutHashes(keymapText(5, LAYOUTS, file))['006d'],
+        layoutHash(mine), 'the kept layout hashes as before');
+    assert.deepEqual(JSON.parse(keymapText(5, LAYOUTS,
+        new TextEncoder().encode(file))), written, 'bytes read as text');
+    // Nothing kept from a file that holds no format 1.
+    for (const other of [null, undefined, 'not json',
+        '{"format": 2, "layouts": {"006d": {"keys": []}}}'])
+        assert.deepEqual(JSON.parse(keymapText(5, LAYOUTS, other)).layouts,
+            LAYOUTS, String(other));
+    // 16 models at most: Odoo's first, then the file's in order.
+    const many = Object.fromEntries(Array.from({length: 20}, (_, i) =>
+        [(0x200 + i).toString(16).padStart(4, '0'), {keys: []}]));
+    const capped = JSON.parse(keymapText(5, LAYOUTS,
+        JSON.stringify({format: 1, layouts: many}))).layouts;
+    assert.equal(Object.keys(capped).length, 16);
+    assert.deepEqual(capped['0084'], LAYOUTS['0084']);
+    assert.ok(Object.hasOwn(capped, '020e'));
+    assert.ok(!Object.hasOwn(capped, '020f'));
 });
 
 test('catalogFrom keeps what the extension can check, else null', () => {
