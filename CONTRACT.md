@@ -224,9 +224,9 @@ check it.
      "actions": [<action>], "icons": [<icon>], "models": {<model>:
      {"cols": <integer>, "rows": <integer>, "keys": <integer>}}}`, the
      actions `plugin:<id>` of the plugins loaded with a home key and of
-     the plugins `DECK_PLUGINS_OFF` turns off, listed without being
-     imported and so whether they have a home key or not, sorted, then
-     `tiles` and `empty`; the icon names of the pattern
+     the plugins `DECK_PLUGINS_OFF` turns off, never imported and left
+     out only when their file, read without being run, shows they have
+     no home key, sorted, then `tiles` and `empty`; the icon names of the pattern
      `[a-z][a-z0-9_]{0,63}`; the geometry of each deck model the Stream
      Deck library knows, from 0 to 256 each. The extension runs it at its
      start and when the checkout's commit changes, and abandons it after
