@@ -159,12 +159,14 @@ check it.
     keys, each `key` from 0 to that count minus one, once. `<action>` is
     `plugin:<id>` (the home key of that plugin, `<id>` of the pattern
     `[a-z][a-z0-9_]{0,63}`), `tiles` (a key of the dashboard) or `empty`
-    (a black key); `<icon>` a name of the catalog's `icons`; `label` at
-    most 16 characters, counted by code point, none of the Unicode
-    categories Cc or Cs. The extension writes only layouts whose actions
-    and icons the catalog of the checkout lists (item 2 of What the
-    extension relies on), for models whose geometry it gives, and no
-    action of a plugin `DECK_PLUGINS_OFF` turns off.
+    (a black key), each `plugin:<id>` once in a layout, since the deck
+    lays out the first key of a plugin and leaves the others free;
+    `<icon>` a name of the catalog's `icons`; `label` at most 16
+    characters, counted by code point, none of the Unicode categories Cc
+    or Cs. The extension writes only layouts whose actions and icons the
+    catalog of the checkout lists (item 2 of What the extension relies
+    on), for models whose geometry it gives, and no action of a plugin
+    `DECK_PLUGINS_OFF` turns off.
 11. **Shared keymap fixtures.** `test/fixtures/keymap/<name>.json` holds
     `catalog` (as `--catalog` prints it), `plugins_off` (the plugins
     turned off), `layouts` (a reply's `settings.key_layouts`) and `valid`,

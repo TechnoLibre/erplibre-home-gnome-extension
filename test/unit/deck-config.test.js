@@ -392,6 +392,8 @@ test('every_hostile_layout_refuses_invalid_key_layouts', () => {
             label: 'a\nb'}]),
         'label with a lone surrogate': one([{key: 0, action: 'tiles',
             label: 'a\ud800'}]),
+        'a plugin on two keys': one([{key: 0, action: 'plugin:timers'},
+            {key: 1, action: 'plugin:timers'}]),
     };
     for (const [what, layouts] of Object.entries(hostile)) {
         assert.deepEqual(validateKeyLayouts(layouts, CATALOG), REFUSED, what);
@@ -410,6 +412,28 @@ test('every_hostile_layout_refuses_invalid_key_layouts', () => {
     assert.deepEqual(validateKeyLayouts(LAYOUTS, CATALOG, ['timers']),
         REFUSED, 'plugin turned off');
     assert.deepEqual(validateKeyLayouts(LAYOUTS, CATALOG, ['sound']),
+        {ok: true, reason: null});
+});
+
+test('a plugin has one home key per layout; tiles and empty repeat', () => {
+    // The deck lays out the first key of a plugin and skips the others:
+    // a second key would show what Odoo shows on a key the deck leaves
+    // free.
+    const twice = {'0084': {keys: [{key: 0, action: 'plugin:timers'},
+        {key: 1, action: 'plugin:timers'}]}};
+    assert.deepEqual(validateKeyLayouts(twice, CATALOG), REFUSED);
+    assert.equal(validateConfig({revision: 2, hash: HASH,
+        settings: {key_layouts: twice}}).reason, 'invalid:key_layouts');
+    assert.throws(() => keymapText(2, twice), RangeError);
+    const other = {...twice, '006d': {keys: [
+        {key: 0, action: 'plugin:timers'}]}};
+    delete other['0084'];
+    assert.deepEqual(validateKeyLayouts({'0084': LAYOUTS['0084'],
+        ...other}, CATALOG), {ok: true, reason: null},
+    'one key per layout: another model may hold it too');
+    const repeats = {'0084': {keys: [0, 1, 2, 3].map(key =>
+        ({key, action: key < 2 ? 'tiles' : 'empty'}))}};
+    assert.deepEqual(validateKeyLayouts(repeats, CATALOG),
         {ok: true, reason: null});
 });
 

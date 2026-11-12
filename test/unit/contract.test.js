@@ -624,6 +624,7 @@ test('the contract states keymap.json as deck-config.js writes it', () => {
         `\`plugin:<id>\` (the home key of that plugin, \`<id>\` of the `
             + `pattern \`${id}\`)`,
         '`tiles` (a key of the dashboard) or `empty` (a black key)',
+        'each `plugin:<id>` once in a layout',
         `at most ${LABEL_MAX} characters, counted by code point, none of `
             + 'the Unicode categories Cc or Cs',
         '`test/fixtures/keymap/<name>.json`'])
