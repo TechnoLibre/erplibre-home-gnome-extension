@@ -1,0 +1,84 @@
+{
+  "catalog": {
+    "format": 1,
+    "actions": [
+      "plugin:sound",
+      "plugin:timers",
+      "tiles",
+      "empty"
+    ],
+    "icons": [
+      "sound",
+      "tile",
+      "timer"
+    ],
+    "models": {
+      "006d": {
+        "cols": 5,
+        "rows": 3,
+        "keys": 15
+      },
+      "0084": {
+        "cols": 4,
+        "rows": 2,
+        "keys": 8
+      }
+    }
+  },
+  "plugins_off": [],
+  "layouts": {
+    "0100": {
+      "keys": []
+    },
+    "0101": {
+      "keys": []
+    },
+    "0102": {
+      "keys": []
+    },
+    "0103": {
+      "keys": []
+    },
+    "0104": {
+      "keys": []
+    },
+    "0105": {
+      "keys": []
+    },
+    "0106": {
+      "keys": []
+    },
+    "0107": {
+      "keys": []
+    },
+    "0108": {
+      "keys": []
+    },
+    "0109": {
+      "keys": []
+    },
+    "010a": {
+      "keys": []
+    },
+    "010b": {
+      "keys": []
+    },
+    "010c": {
+      "keys": []
+    },
+    "010d": {
+      "keys": []
+    },
+    "010e": {
+      "keys": []
+    },
+    "010f": {
+      "keys": []
+    },
+    "0110": {
+      "keys": []
+    }
+  },
+  "valid": false,
+  "loader": "automatic"
+}

@@ -184,6 +184,18 @@ restart failed: it then stays offered until a click restarts the service.
 `$XDG_STATE_HOME/erplibre-home/pilot.json` tells ERPLibre's TODO menu
 which settings Odoo locked.
 
+Odoo may also lay out the home keys of each deck model: which key opens
+which plugin, which keys hold the dashboard, which stay black, with an
+icon and a label. The extension sends Odoo the catalog of the deck
+program of the checkout (its plugins with a home key, its icons, the
+geometry of each model), read at its start and when the checkout's
+commit changes. A layout whose action, icon or key the catalog does not
+allow, or that names a plugin turned off, refuses the revision; once
+clicked, `~/.config/erplibre-home/keymap.json` is written with
+`streamdeck.conf`, both or neither, before one restart of the deck
+service, which reads it at its start. Only the models Odoo lays out are
+replaced there: the layout of another model, edited by hand, stays.
+
 ## Icon badges
 
 Each visible indicator decorates its top-bar icon with a small circular

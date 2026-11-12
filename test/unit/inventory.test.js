@@ -26,7 +26,7 @@ function event(uuid, at = '2026-01-10T12:00:00.000Z', kind = 'plugged') {
 // --- constants and module shape ---
 
 test('inventory constants follow the wire contract', () => {
-    assert.equal(INVENTORY_PROTOCOL, '1.1');
+    assert.equal(INVENTORY_PROTOCOL, '1.2');
     assert.equal(HEARTBEAT_S, 900);
     assert.equal(POLL_S, 10);
     assert.equal(TIMEOUT_S, 10);
@@ -554,12 +554,13 @@ test('reportBody carries protocol, state, pending events and lost count',
         q.push(event('a'));
         q.push(event('b'));
         const state = {hostname: 'h'};
-        assert.deepEqual(reportBody(state, q), {protocol: '1.1', state,
+        assert.deepEqual(reportBody(state, q), {protocol: '1.2', state,
             events: [event('b')], lost_events: 1, config: {pilot: false}});
     });
 
 const CURRENT = {deck_program: 'tiler', plugins_off: ['sound'],
-    session_refresh_sec: 5, games: 'on'};
+    session_refresh_sec: 5, games: 'on',
+    key_layouts: {'0084': 'a'.repeat(64), '006d': null}};
 const APPLIED = {revision: 4, status: 'applied', reason: null,
     at: '2026-01-10T12:00:00.000Z'};
 
@@ -593,7 +594,7 @@ test('the pilot body holds only what Odoo accepts', () => {
             extra: 1},
         choice: 'later'});
     assert.deepEqual(body.current, {deck_program: null, plugins_off: null,
-        session_refresh_sec: null, games: 'off'});
+        session_refresh_sec: null, games: 'off', key_layouts: {}});
     assert.equal(body.revision_applied, null);
     assert.equal(body.choice, null);
     assert.deepEqual(Object.keys(body.result),
@@ -608,7 +609,44 @@ test('the pilot body holds only what Odoo accepts', () => {
     'an applied result carries no reason');
     assert.deepEqual(configBody({pilot: true}).current,
         {deck_program: null, plugins_off: null, session_refresh_sec: null,
-            games: null});
+            games: null, key_layouts: null});
+});
+
+test('the pilot body carries a hash per model of keymap.json, or null', () => {
+    const hash = 'b'.repeat(64);
+    const of = key_layouts => configBody({pilot: true,
+        current: {...CURRENT, key_layouts}}).current.key_layouts;
+    assert.deepEqual(of({'0084': hash, '006d': null}),
+        {'0084': hash, '006d': null});
+    assert.equal(of(null), null);
+    const sixteen = Object.fromEntries(Array.from({length: 16}, (_, i) =>
+        [(0x100 + i).toString(16).padStart(4, '0'), hash]));
+    assert.deepEqual(of(sixteen), sixteen);
+    // Anything else is no hash Odoo could compare: none at all.
+    for (const bad of [[], 'x', {'0084': 'B'.repeat(64)},
+        {'0084': hash.slice(1)}, {'84': hash}, {'0084': 1},
+        {...sixteen, '0200': hash}])
+        assert.equal(of(bad), null, JSON.stringify(bad));
+});
+
+test('the state carries the deck catalog up to 32 KiB, else none', () => {
+    const catalog = {format: 1, actions: ['plugin:timers', 'tiles', 'empty'],
+        icons: ['timer'], models: {'0084': {cols: 4, rows: 2, keys: 8}}};
+    const state = deckCatalog => buildState({serviceState: 'active',
+        deckCatalog});
+    assert.deepEqual(state(catalog).deck_catalog, catalog);
+    assert.deepEqual(Object.keys(state(catalog)).slice(-2),
+        ['deck_plugins', 'deck_catalog']);
+    for (const none of [null, undefined, {...catalog, format: 2}, 'x'])
+        assert.equal(Object.hasOwn(state(none), 'deck_catalog'), false,
+            String(none));
+    const icons = n => ({...catalog, icons: Array.from({length: n},
+        (_, i) => `icon_${String(i).padStart(5, '0')}`)});
+    let n = 0;
+    while (JSON.stringify(icons(n + 1)).length <= 32 * 1024) n++;
+    assert.deepEqual(state(icons(n)).deck_catalog, icons(n));
+    assert.equal(Object.hasOwn(state(icons(n + 1)), 'deck_catalog'), false,
+        'past 32 KiB, dropped');
 });
 
 test('the_body_carries_the_choice_once', () => {
@@ -872,14 +910,14 @@ test('checkDestination keeps a label short and on one line', () => {
 test('enrollBody builds the body of each method, protocol first', () => {
     const facts = {fingerprint: FP, hostname: 'deckhost'};
     assert.deepEqual(enrollBody({method: 'pairing_code', code: ' abcd-efgh '},
-        facts), {ok: true, error: null, body: {protocol: '1.1',
+        facts), {ok: true, error: null, body: {protocol: '1.2',
         method: 'pairing_code', fingerprint: FP, hostname: 'deckhost',
         code: 'ABCDEFGH'}});
     assert.deepEqual(enrollBody({method: 'api_key', key: ' KEY-INVENTED '},
-        facts).body, {protocol: '1.1', method: 'api_key', fingerprint: FP,
+        facts).body, {protocol: '1.2', method: 'api_key', fingerprint: FP,
         hostname: 'deckhost', key: 'KEY-INVENTED'});
     assert.deepEqual(enrollBody({method: 'password', login: ' someone ',
-        password: ' pw invented '}, facts).body, {protocol: '1.1',
+        password: ' pw invented '}, facts).body, {protocol: '1.2',
         method: 'password', fingerprint: FP, hostname: 'deckhost',
         login: 'someone', password: ' pw invented '});
 });

@@ -6,10 +6,15 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync, readdirSync} from 'node:fs';
+import {createHash} from 'node:crypto';
+import {spawnSync} from 'node:child_process';
 import {
     CONFIG_KEYS, CHOICES, PLUGIN_ID_RE, PLUGINS_OFF_MAX, REFUSAL_REASONS,
     validateConfig, readCurrent, rewriteConf, confLines, changedKeys,
-    needsRestart,
+    needsRestart, WIRE_KEYS, KEYMAP_KEY, KEYMAP_FORMAT, KEYMAP_MODELS_MAX,
+    LABEL_MAX, CATALOG_MAX, validateKeyLayouts, keymapText, layoutHashes,
+    layoutHash, canonicalJson, sha256Hex, catalogFrom, parseCatalog,
+    readLocal,
 } from '../../lib/deck-config.js';
 
 const FIXTURES = new URL('../fixtures/streamdeck_conf/', import.meta.url);
@@ -148,13 +153,12 @@ test('a key locked or asked out of place refuses as invalid:<key>', () => {
 // Odoo answers 400 to a `result.reason` outside the contract's list, and
 // the report then never goes through: a refusal names a key of the table.
 test('every refusal names a key of the table, as Odoo receives it', () => {
-    const named = new RegExp(`^invalid:(${Object.keys(CONFIG_KEYS)
-        .join('|')})$`);
+    const named = new RegExp(`^invalid:(${WIRE_KEYS.join('|')})$`);
     const others = {deck_program: 'controller', games: 'off'};
     const configs = [...FRAMES,
         ...Object.entries(BAD).flatMap(([key, values]) =>
             values.map(value => reply({...others, [key]: value}))),
-        ...Object.keys(CONFIG_KEYS).flatMap(key => [
+        ...WIRE_KEYS.flatMap(key => [
             reply(others, {locked: [key]}), reply(others, {ask: [key]}),
             reply(others, {locked: [key], ask: [key]})])];
     for (const config of configs) {
@@ -167,9 +171,9 @@ test('every refusal names a key of the table, as Odoo receives it', () => {
 
 test('a valid reply comes back normalised, unknown keys ignored', () => {
     const r = validateConfig({revision: 0, hash: HASH,
-        settings: {games: 'off', key_layouts: {x: 1},
+        settings: {games: 'off', brightness: {x: 1},
             plugins_off: ['sound', 'timers', 'sound'], deck_program: 'none'},
-        locked: ['games', 'key_layouts', 'games'], ask: ['deck_program'],
+        locked: ['games', 'brightness', 'games'], ask: ['deck_program'],
         extra: true});
     assert.deepEqual(r, {ok: true, revision: 0, hash: HASH,
         settings: {deck_program: 'none', plugins_off: ['sound', 'timers'],
@@ -204,8 +208,12 @@ test('an_ask_key_outside_the_free_keys_refuses', () => {
         {ok: false, reason: `invalid:${key}`, revision: 3}, key);
     }
     assert.deepEqual(validateConfig(reply(settings,
-        {locked: ['games'], ask: ['deck_program', 'key_layouts']})).ask,
+        {locked: ['games'], ask: ['deck_program', 'brightness']})).ask,
     ['deck_program']);
+    assert.deepEqual(validateConfig(reply(settings,
+        {ask: ['deck_program', 'key_layouts']})),
+    {ok: false, reason: 'invalid:key_layouts', revision: 3},
+    'a known key since 1.2');
 });
 
 test('readCurrent_matches_the_settings_library', () => {
@@ -314,5 +322,321 @@ test('games_alone_needs_no_restart', () => {
     assert.equal(needsRestart([]), false);
     for (const key of ['deck_program', 'plugins_off', 'session_refresh_sec'])
         assert.equal(needsRestart(['games', key]), true, key);
-    assert.equal(needsRestart(['key_layouts']), false);
+    assert.equal(needsRestart(['key_layouts']), true, 'read at the start');
+    assert.equal(needsRestart(['brightness']), false, 'unknown');
+});
+
+// ---------------------------------------------------------------------
+// Key layouts (contract 1.4, protocol 1.2): keymap.json, written from the
+// reply's `settings.key_layouts` once each layout passes the format rules
+// and the catalog the deck program printed. The fixtures of
+// test/fixtures/keymap/ are shared with ERPLibre: each states what its
+// loader does with them.
+
+const KEYMAP_FIXTURES = new URL('../fixtures/keymap/', import.meta.url);
+// What ERPLibre's loader does with a fixture's layouts (CONTRACT.md,
+// item 11 of What ERPLibre relies on).
+const LOADER_VERDICTS = ['problem', 'automatic', 'as_sent'];
+
+function keymapFixtures() {
+    return readdirSync(KEYMAP_FIXTURES).filter(f => f.endsWith('.json'))
+        .sort().map(f => ({name: f.slice(0, -'.json'.length),
+            ...JSON.parse(readFileSync(new URL(f, KEYMAP_FIXTURES), 'utf8'))}));
+}
+
+const CATALOG = {format: 1,
+    actions: ['plugin:sound', 'plugin:timers', 'tiles', 'empty'],
+    icons: ['sound', 'tile', 'timer'],
+    models: {'006d': {cols: 5, rows: 3, keys: 15},
+        '0084': {cols: 4, rows: 2, keys: 8}}};
+const LAYOUTS = {'0084': {keys: [
+    {key: 0, action: 'plugin:timers', icon: 'timer', label: 'Minuteries'},
+    {key: 1, action: 'tiles'}, {key: 2, action: 'empty'}]}};
+const REFUSED = {ok: false, reason: 'invalid:key_layouts'};
+
+test('key_layouts is the fifth wire key, after the lines of the conf', () => {
+    assert.equal(KEYMAP_KEY, 'key_layouts');
+    assert.deepEqual(WIRE_KEYS, [...Object.keys(CONFIG_KEYS), 'key_layouts']);
+    assert.equal(KEYMAP_FORMAT, 1);
+    assert.equal(KEYMAP_MODELS_MAX, 16);
+    assert.equal(LABEL_MAX, 16);
+    assert.equal(CATALOG_MAX, 32 * 1024);
+});
+
+test('the shared keymap fixtures give their verdict', () => {
+    const all = keymapFixtures();
+    assert.ok(all.some(f => f.valid) && all.some(f => !f.valid));
+    for (const f of all) {
+        assert.deepEqual(Object.keys(f), ['name', 'catalog', 'plugins_off',
+            'layouts', 'valid', 'loader'], f.name);
+        assert.ok(LOADER_VERDICTS.includes(f.loader), f.name);
+        // What the extension writes, the deck lays out without a problem.
+        assert.ok(!f.valid || f.loader !== 'problem', f.name);
+        assert.deepEqual(validateKeyLayouts(f.layouts, f.catalog,
+            f.plugins_off), f.valid ? {ok: true, reason: null} : REFUSED,
+        f.name);
+    }
+});
+
+// Review Focus 1 of the plan, as the wire brings it: each refuses the
+// whole revision with invalid:key_layouts, before anything is written.
+test('every_hostile_layout_refuses_invalid_key_layouts', () => {
+    const one = keys => ({'0084': {keys}});
+    const hostile = {
+        'not an object': 'garbage',
+        'a list': [LAYOUTS],
+        'null': null,
+        'unknown format of a layout': {'0084': {format: 2, keys: []}},
+        'key out of range': one([{key: 8, action: 'tiles'}]),
+        'duplicate key': one([{key: 0, action: 'tiles'},
+            {key: 0, action: 'tiles'}]),
+        'unknown icon': one([{key: 0, action: 'tiles', icon: 'nope'}]),
+        'plugin missing': one([{key: 0, action: 'plugin:nothere'}]),
+        '10 000 entries': one(Array.from({length: 10000}, (_, i) =>
+            ({key: i, action: 'empty'}))),
+        'label with a control char': one([{key: 0, action: 'tiles',
+            label: 'a\nb'}]),
+        'label with a lone surrogate': one([{key: 0, action: 'tiles',
+            label: 'a\ud800'}]),
+        'a plugin on two keys': one([{key: 0, action: 'plugin:timers'},
+            {key: 1, action: 'plugin:timers'}]),
+    };
+    for (const [what, layouts] of Object.entries(hostile)) {
+        assert.deepEqual(validateKeyLayouts(layouts, CATALOG), REFUSED, what);
+        const r = validateConfig({revision: 4, hash: HASH,
+            settings: {games: 'on', key_layouts: layouts}});
+        if (r.ok) {
+            // Only the catalog knows it: the service refuses it then.
+            assert.ok(['unknown icon', 'plugin missing', 'key out of range']
+                .includes(what), what);
+        } else {
+            assert.deepEqual(r, {ok: false, reason: 'invalid:key_layouts',
+                revision: 4}, what);
+            assert.throws(() => keymapText(4, layouts), RangeError, what);
+        }
+    }
+    assert.deepEqual(validateKeyLayouts(LAYOUTS, CATALOG, ['timers']),
+        REFUSED, 'plugin turned off');
+    assert.deepEqual(validateKeyLayouts(LAYOUTS, CATALOG, ['sound']),
+        {ok: true, reason: null});
+});
+
+test('a plugin has one home key per layout; tiles and empty repeat', () => {
+    // The deck lays out the first key of a plugin and skips the others:
+    // a second key would show what Odoo shows on a key the deck leaves
+    // free.
+    const twice = {'0084': {keys: [{key: 0, action: 'plugin:timers'},
+        {key: 1, action: 'plugin:timers'}]}};
+    assert.deepEqual(validateKeyLayouts(twice, CATALOG), REFUSED);
+    assert.equal(validateConfig({revision: 2, hash: HASH,
+        settings: {key_layouts: twice}}).reason, 'invalid:key_layouts');
+    assert.throws(() => keymapText(2, twice), RangeError);
+    const other = {...twice, '006d': {keys: [
+        {key: 0, action: 'plugin:timers'}]}};
+    delete other['0084'];
+    assert.deepEqual(validateKeyLayouts({'0084': LAYOUTS['0084'],
+        ...other}, CATALOG), {ok: true, reason: null},
+    'one key per layout: another model may hold it too');
+    const repeats = {'0084': {keys: [0, 1, 2, 3].map(key =>
+        ({key, action: key < 2 ? 'tiles' : 'empty'}))}};
+    assert.deepEqual(validateKeyLayouts(repeats, CATALOG),
+        {ok: true, reason: null});
+});
+
+test('a_layout_action_outside_the_catalog_refuses', () => {
+    // A checkout older than the layout: no timers plugin in its catalog.
+    const older = {...CATALOG, actions: ['plugin:sound', 'tiles', 'empty']};
+    assert.deepEqual(validateKeyLayouts(LAYOUTS, older), REFUSED);
+    for (const catalog of [null, undefined, {}, {...CATALOG, format: 2},
+        'x'])
+        assert.deepEqual(validateKeyLayouts(LAYOUTS, catalog), REFUSED,
+            JSON.stringify(catalog));
+    assert.deepEqual(validateKeyLayouts({}, null), REFUSED,
+        'no catalog read, nothing to write against');
+    const noTiles = {...CATALOG, actions: ['plugin:timers', 'empty']};
+    assert.deepEqual(validateKeyLayouts(LAYOUTS, noTiles), REFUSED);
+});
+
+test('a valid key_layouts comes back in the settings as sent', () => {
+    const r = validateConfig({revision: 2, hash: HASH,
+        settings: {key_layouts: LAYOUTS, games: 'on'},
+        locked: ['key_layouts'], ask: []});
+    assert.equal(r.ok, true);
+    assert.deepEqual(Object.keys(r.settings), ['games', 'key_layouts']);
+    assert.deepEqual(r.settings.key_layouts, LAYOUTS);
+    assert.deepEqual(r.locked, ['key_layouts']);
+    assert.deepEqual(validateConfig({revision: 2, hash: HASH,
+        settings: {games: 'on'}, locked: ['key_layouts']}),
+    {ok: false, reason: 'invalid:key_layouts', revision: 2});
+});
+
+test('keymapText writes format 1, the revision and the layouts', () => {
+    const text = keymapText(7, LAYOUTS);
+    assert.ok(text.endsWith('\n'));
+    assert.deepEqual(JSON.parse(text), {format: 1, revision: 7,
+        layouts: LAYOUTS});
+    assert.throws(() => keymapText(-1, LAYOUTS), RangeError);
+    assert.deepEqual(JSON.parse(keymapText(0, {})).layouts, {});
+});
+
+test('the layout hash is Python\'s json.dumps canonical form, sha256', () => {
+    const layout = {keys: [{label: 'Café ☕ "q" \\ \u007f\u0085'
+        + '\u{1F3AE}\t', key: 3, action: 'tiles', icon: 'timer'},
+    {key: 0, action: 'empty'}]};
+    assert.equal(canonicalJson(layout), '{"keys":[{"action":"tiles",'
+        + '"icon":"timer","key":3,"label":"Caf\\u00e9 \\u2615 \\"q\\" \\\\ '
+        + '\\u007f\\u0085\\ud83c\\udfae\\t"},{"action":"empty","key":0}]}');
+    assert.equal(canonicalJson([true, false, null, -2, 'a\u0001\b\f\n\r']),
+        '[true,false,null,-2,"a\\u0001\\b\\f\\n\\r"]');
+    assert.equal(sha256Hex(''), 'e3b0c44298fc1c149afbf4c8996fb924'
+        + '27ae41e4649b934ca495991b7852b855');
+    assert.equal(sha256Hex('a'.repeat(1000)), createHash('sha256')
+        .update('a'.repeat(1000)).digest('hex'));
+    assert.equal(layoutHash(layout), createHash('sha256')
+        .update(canonicalJson(layout)).digest('hex'));
+    const py = spawnSync('python3', ['-c', 'import hashlib, json, sys\n'
+        + 'for l in json.load(sys.stdin):\n'
+        + '    print(hashlib.sha256(json.dumps(l, sort_keys=True,'
+        + ' separators=(",", ":")).encode()).hexdigest())'],
+    {input: JSON.stringify([layout, LAYOUTS['0084']]), encoding: 'utf8',
+        env: {...process.env, PYTHONIOENCODING: 'utf-8'}});
+    if (py.status !== 0) return;
+    assert.deepEqual(py.stdout.trim().split('\n'),
+        [layoutHash(layout), layoutHash(LAYOUTS['0084'])]);
+});
+
+test('layoutHashes reads keymap.json, null when it holds no format 1', () => {
+    const bytes = new TextEncoder().encode(keymapText(3, LAYOUTS));
+    assert.deepEqual(layoutHashes(bytes),
+        {'0084': layoutHash(LAYOUTS['0084'])});
+    assert.deepEqual(layoutHashes(keymapText(3, LAYOUTS)),
+        layoutHashes(bytes), 'a text reads as its bytes');
+    for (const file of [null, undefined, '', 'not json', '[]', '{}',
+        '{"format": 2, "layouts": {}}', '{"format": 1, "layouts": []}',
+        '{"format": "1", "layouts": {}}', new Uint8Array([0x7b, 0xff]),
+        `{"format": 1, "layouts": {}, "x": "${'y'.repeat(300 * 1024)}"}`])
+        assert.equal(layoutHashes(file), null, String(file).slice(0, 40));
+    // A layout of another shape has no hash; a name of another form, or
+    // past the sixteenth model, is not read.
+    const odd = JSON.stringify({format: 1, layouts: {'0084': [],
+        '006d': {keys: 'x'}, 'ABCD': {keys: []},
+        ...Object.fromEntries(Array.from({length: 20}, (_, i) =>
+            [(0x200 + i).toString(16).padStart(4, '0'), {keys: []}]))}});
+    const hashes = layoutHashes(odd);
+    assert.equal(Object.keys(hashes).length, 16);
+    assert.equal(hashes['0084'], null);
+    assert.equal(hashes['006d'], layoutHash({keys: 'x'}));
+    assert.equal(hashes['020d'], layoutHash({keys: []}));
+    assert.equal(hashes['020e'], undefined, 'past the sixteenth in order');
+    assert.equal(hashes.ABCD, undefined);
+    const two = JSON.stringify({format: 1, layouts: {'0084': [],
+        '006d': {keys: []}}});
+    assert.deepEqual(layoutHashes(two), {'006d': layoutHash({keys: []}),
+        '0084': null});
+});
+
+test('a layout nested past the bound hashes as null, never throws', () => {
+    // 100 000 levels fit in 256 KiB: hashed as they come, they would
+    // exhaust the stack of GJS and node alike, and with it every report.
+    const n = 100000;
+    const deep = `{"format": 1, "layouts": {"0084": {"keys": `
+        + `${'['.repeat(n)}${']'.repeat(n)}}, "006d": {"keys": []}}}`;
+    assert.ok(deep.length < 256 * 1024);
+    assert.deepEqual(layoutHashes(deep), {'006d': layoutHash({keys: []}),
+        '0084': null});
+    assert.deepEqual(readLocal('', deep).key_layouts['0084'], null);
+    // The format nests 3 levels; up to 8 a layout of another shape still
+    // hashes, past it gives null.
+    const nested = depth => {
+        let v = 1;
+        for (let i = 1; i < depth; i++) v = [v];
+        return {keys: v};
+    };
+    const at = depth => layoutHashes(JSON.stringify({format: 1,
+        layouts: {'0084': nested(depth)}}))['0084'];
+    assert.equal(at(8), layoutHash(nested(8)));
+    assert.equal(at(9), null);
+});
+
+test('readLocal adds the layout hashes to the values of the conf', () => {
+    const local = readLocal('GAMES=off\n', keymapText(1, LAYOUTS));
+    assert.deepEqual(local, {...readCurrent('GAMES=off\n'),
+        key_layouts: {'0084': layoutHash(LAYOUTS['0084'])}});
+    assert.equal(readLocal(null, null).key_layouts, null);
+    assert.equal(readLocal(null, undefined).key_layouts, null,
+        'a keymap that cannot be read holds nothing');
+});
+
+test('changedKeys compares the layouts by their hashes', () => {
+    const held = {...readCurrent('GAMES=on\n'),
+        key_layouts: {'0084': layoutHash(LAYOUTS['0084'])}};
+    assert.deepEqual(changedKeys(held, {games: 'on', key_layouts: LAYOUTS}),
+        []);
+    // Another order of the same layout's keys is another layout.
+    const swapped = {'0084': {keys: [...LAYOUTS['0084'].keys].reverse()}};
+    assert.deepEqual(changedKeys(held, {key_layouts: swapped}),
+        ['key_layouts']);
+    // Only the models Odoo sends count: the file's other layouts stay
+    // the employee's.
+    assert.deepEqual(changedKeys(held, {key_layouts: {}}), [],
+        'a model the file holds and Odoo does not send');
+    assert.deepEqual(changedKeys({...held, key_layouts: {...held.key_layouts,
+        '006d': 'f'.repeat(64)}}, {key_layouts: LAYOUTS}), []);
+    assert.deepEqual(changedKeys({...held, key_layouts: null},
+        {key_layouts: LAYOUTS}), ['key_layouts'], 'no file holds none');
+    assert.deepEqual(changedKeys(held, {key_layouts: {...LAYOUTS,
+        '006d': {keys: []}}}), ['key_layouts']);
+});
+
+test('keymapText keeps the layouts of the models Odoo does not send', () => {
+    const mine = {keys: [{key: 4, action: 'tiles', label: 'à moi'}],
+        note: 'hand made'};
+    const file = `${JSON.stringify({format: 1, revision: 2, layouts: {
+        '0084': {keys: []}, '006d': mine, 'ABCD': {keys: []},
+        '0063': [], '0090': {keys: 'x'}}}, null, 4)}\n`;
+    const written = JSON.parse(keymapText(5, LAYOUTS, file));
+    assert.deepEqual(written, {format: 1, revision: 5, layouts: {
+        '006d': mine, '0084': LAYOUTS['0084'], '0090': {keys: 'x'}}},
+    'Odoo\'s model replaced, the hashed layouts of the others kept as'
+        + ' they are, a name or a layout without a hash dropped');
+    assert.equal(layoutHashes(keymapText(5, LAYOUTS, file))['006d'],
+        layoutHash(mine), 'the kept layout hashes as before');
+    assert.deepEqual(JSON.parse(keymapText(5, LAYOUTS,
+        new TextEncoder().encode(file))), written, 'bytes read as text');
+    // Nothing kept from a file that holds no format 1.
+    for (const other of [null, undefined, 'not json',
+        '{"format": 2, "layouts": {"006d": {"keys": []}}}'])
+        assert.deepEqual(JSON.parse(keymapText(5, LAYOUTS, other)).layouts,
+            LAYOUTS, String(other));
+    // 16 models at most: Odoo's first, then the file's in order.
+    const many = Object.fromEntries(Array.from({length: 20}, (_, i) =>
+        [(0x200 + i).toString(16).padStart(4, '0'), {keys: []}]));
+    const capped = JSON.parse(keymapText(5, LAYOUTS,
+        JSON.stringify({format: 1, layouts: many}))).layouts;
+    assert.equal(Object.keys(capped).length, 16);
+    assert.deepEqual(capped['0084'], LAYOUTS['0084']);
+    assert.ok(Object.hasOwn(capped, '020e'));
+    assert.ok(!Object.hasOwn(capped, '020f'));
+});
+
+test('catalogFrom keeps what the extension can check, else null', () => {
+    assert.deepEqual(catalogFrom(CATALOG), CATALOG);
+    assert.deepEqual(parseCatalog(`${JSON.stringify(CATALOG)}\n`), CATALOG);
+    for (const bad of [null, 'x', [], {...CATALOG, format: 2},
+        {...CATALOG, actions: 'tiles'}, {...CATALOG, icons: null},
+        {...CATALOG, models: []}])
+        assert.equal(catalogFrom(bad), null, JSON.stringify(bad));
+    for (const text of [null, '', 'not json', '{"format": 1}',
+        `${' '.repeat(300 * 1024)}{}`])
+        assert.equal(parseCatalog(text), null, String(text).slice(0, 20));
+    // What a newer program may add: an item of another form is left out,
+    // the rest is kept.
+    assert.deepEqual(catalogFrom({...CATALOG,
+        actions: [...CATALOG.actions, 'page:x', 1, 'tiles'],
+        icons: [...CATALOG.icons, 'Bad Icon'],
+        models: {...CATALOG.models, '0080': {cols: 4, rows: 2},
+            'ABCD': {cols: 1, rows: 1, keys: 1},
+            '0090': {cols: 3, rows: 1, keys: 3, dials: 4}},
+        extra: true}), {...CATALOG, models: {...CATALOG.models,
+        '0090': {cols: 3, rows: 1, keys: 3}}});
 });

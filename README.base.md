@@ -302,6 +302,18 @@ restart failed: it then stays offered until a click restarts the service.
 `$XDG_STATE_HOME/erplibre-home/pilot.json` tells ERPLibre's TODO menu
 which settings Odoo locked.
 
+Odoo may also lay out the home keys of each deck model: which key opens
+which plugin, which keys hold the dashboard, which stay black, with an
+icon and a label. The extension sends Odoo the catalog of the deck
+program of the checkout (its plugins with a home key, its icons, the
+geometry of each model), read at its start and when the checkout's
+commit changes. A layout whose action, icon or key the catalog does not
+allow, or that names a plugin turned off, refuses the revision; once
+clicked, `~/.config/erplibre-home/keymap.json` is written with
+`streamdeck.conf`, both or neither, before one restart of the deck
+service, which reads it at its start. Only the models Odoo lays out are
+replaced there: the layout of another model, edited by hand, stays.
+
 ## Icon badges
 
 Each visible indicator decorates its top-bar icon with a small circular
@@ -446,6 +458,19 @@ déjà est remontée appliquée, sans notification, sauf si son redémarrage a
 service.
 `$XDG_STATE_HOME/erplibre-home/pilot.json` dit au menu TODO d'ERPLibre
 quels réglages Odoo a verrouillés.
+
+Odoo peut aussi disposer les touches d'accueil de chaque modèle de deck :
+quelle touche ouvre quel plugin, lesquelles portent le tableau de bord,
+lesquelles restent noires, avec une icône et un libellé. L'extension
+envoie à Odoo le catalogue du programme du deck du checkout (ses plugins
+à touche d'accueil, ses icônes, la géométrie de chaque modèle), lu à son
+démarrage et quand le commit du checkout change. Une disposition dont le
+catalogue ne permet pas l'action, l'icône ou la touche, ou qui nomme un
+plugin coupé, refuse la révision ; au clic,
+`~/.config/erplibre-home/keymap.json` est écrit avec `streamdeck.conf`,
+les deux ou aucun, avant un seul redémarrage du service du deck, qui le
+lit à son démarrage. Seuls les modèles qu'Odoo dispose y sont remplacés :
+la disposition d'un autre modèle, éditée à la main, reste.
 
 ## Pastilles de comptage
 

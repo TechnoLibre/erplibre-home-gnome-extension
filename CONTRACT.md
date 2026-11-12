@@ -1,6 +1,6 @@
 # Contract between the extension and ERPLibre
 
-**Contract version: 1.3**
+**Contract version: 1.4**
 
 The extension runs on its own (see `README.md`). ERPLibre also clones this
 repository at `script/gnome-extension/erplibre_home/`, by Google Repo or by
@@ -146,6 +146,44 @@ check it.
    (what the extension reads in `<name>.in.conf`); `<name>.out.conf`, the
    bytes once `lines` are written. ERPLibre's writer of `streamdeck.conf`
    gives the same bytes from the same input.
+10. **Key layouts.** `~/.config/erplibre-home/keymap.json`, the literal
+    directory of the deck's `settings.json` whatever `$XDG_CONFIG_HOME`
+    says, mode 0644, written by the extension only, in one atomic
+    replacement, holds the home keys an Odoo lays out per deck model (see
+    [Odoo inventory](#odoo-inventory)): `{"format": 1, "revision":
+    <integer>, "layouts": {<model>: {"keys": [<entry>]}}}`. `<model>` is a
+    `usb_product_id`, 4 lowercase hex digits, 16 models at most;
+    `<entry>` is `{"key": <integer>, "action": <action>, "icon": <icon>,
+    "label": <text>}`, `icon` and `label` optional and never null, and no
+    other key. A layout holds at most as many entries as the model has
+    keys, each `key` from 0 to that count minus one, once. `<action>` is
+    `plugin:<id>` (the home key of that plugin, `<id>` of the pattern
+    `[a-z][a-z0-9_]{0,63}`), `tiles` (a key of the dashboard) or `empty`
+    (a black key), each `plugin:<id>` once in a layout, since the deck
+    lays out the first key of a plugin and leaves the others free;
+    `<icon>` a name of the catalog's `icons`; `label` at most 16
+    characters, counted by code point, none of the Unicode categories Cc
+    or Cs. The extension writes only layouts whose actions and icons the
+    catalog of the checkout lists (item 2 of What the extension relies
+    on), for models whose geometry it gives, and no action of a plugin
+    `DECK_PLUGINS_OFF` turns off. A plugin the catalog lists because it
+    is turned off may have no home key: a revision that turns it on and
+    names it gets a black key, with a line in the deck's journal.
+11. **Shared keymap fixtures.** `test/fixtures/keymap/<name>.json` holds
+    `catalog` (as `--catalog` prints it), `plugins_off` (the plugins
+    turned off), `layouts` (a reply's `settings.key_layouts`), `valid`,
+    whether the extension writes those layouts, and `loader`, what
+    ERPLibre's loader does with a `keymap.json` that holds them: read by
+    its `load`, then laid out by its `layout_for` on each model of the
+    catalog, with the plugins that layout names loaded with a home button
+    unless the catalog lacks them or `plugins_off` turns them off.
+    `problem`: `layout_for` gives one problem at least. `automatic`: it
+    gives none and keeps the automatic layout of every model (a model it
+    does not find, or a file `load` refuses). `as_sent`: it gives none and
+    lays out the entries (a field it does not know is ignored). A valid
+    case is never `problem`: the deck skips nothing the extension
+    writes. An invalid case may be any of the three, the extension being
+    the stricter reader.
 
 ## What the extension relies on
 
@@ -179,7 +217,22 @@ check it.
    - deck plugins are the `*.py` files, not starting with `_`, of
      `script/stream_deck/erplibre_streamdeck/plugins/` and of
      `$XDG_CONFIG_HOME/erplibre-home/deck-plugins/`, named by the file
-     without `.py`.
+     without `.py`;
+   - `.venv.streamdeck/bin/python script/stream_deck/erplibre_streamdeck
+     --catalog` prints the catalog of the deck program as JSON and exits
+     0, without opening a deck nor taking the deck lock: `{"format": 1,
+     "actions": [<action>], "icons": [<icon>], "models": {<model>:
+     {"cols": <integer>, "rows": <integer>, "keys": <integer>}}}`, the
+     actions `plugin:<id>` of the plugins loaded with a home key and of
+     the plugins `DECK_PLUGINS_OFF` turns off, never imported and left
+     out only when their file, read without being run, shows they have
+     no home key, sorted, then `tiles` and `empty`; the icon names of the pattern
+     `[a-z][a-z0-9_]{0,63}`; the geometry of each deck model the Stream
+     Deck library knows, from 0 to 256 each. The extension runs it at its
+     start and when the checkout's commit changes, and abandons it after
+     10 s. An item of another form is left out; an output that does not
+     parse, or of another `format`, is no catalog; the deck program reads
+     `keymap.json` (item 10 of What ERPLibre relies on) at its start.
 3. **Games gallery:** `script/stream_deck/games/gallery_server.py`, run by
    the Stream Deck venv's python, serves `http://localhost:8042` with
    `GET /api/games` and `GET /launch/<id>` (header
@@ -205,7 +258,7 @@ check it.
 The extension reports the Stream Decks of the workstation, and the state
 of its deck service, to each Odoo instance of the GSettings key
 `inventory-destinations`. The wire format has its own version,
-`"protocol": "1.1"` in every body and every reply, apart from this
+`"protocol": "1.2"` in every body and every reply, apart from this
 contract's: Odoo answers an unknown MAJOR with 400
 `protocol_unsupported`, accepts a newer MINOR and ignores the keys it does
 not know.
@@ -249,7 +302,9 @@ route.
   on disk, sorted, at most 128 of the pattern `[a-z][a-z0-9_]{0,63}`
   (`[]` outside a checkout); `decks`, the decks connected now, each with
   `serial`, `usb_product_id` (4 lowercase hex digits), `usb_path` and
-  `firmware`. Unknown values are null, and so is a serial outside
+  `firmware`; `deck_catalog`, the catalog the deck program printed, left
+  out when there is none or past 32 KiB of JSON. Unknown values are null,
+  and so is a serial outside
   `[A-Za-z0-9._-]{1,64}` or a `usb_product_id` of another form, which
   Odoo refuses. Every text holds at most 256 characters, counted by code
   point, and no NUL character: Odoo answers 400 `bad_request` to either,
@@ -276,6 +331,15 @@ route.
   holds nothing local to keep (the deck runs its default). `result` says
   what became of the last revision received, until a report carrying it
   is answered 200.
+  `current.key_layouts` holds, for each model of `keymap.json` (16 at
+  most, in order), the sha256 of its layout in lowercase hex, taken on
+  its canonical JSON: Python's
+  `json.dumps(layout, sort_keys=True, separators=(",", ":"))`, keys
+  sorted, no white space, every character outside printable ASCII
+  escaped as `\uXXXX` in lowercase hex. It holds null for a layout that
+  is not an object or that nests lists and objects more than 8 levels
+  deep (the format nests 3), and is null without a `keymap.json` of
+  format 1.
   `choice` is the employee's answer to an `ask`, sent once, in the
   report that follows it. A pilot that cannot read `streamdeck.conf`,
   though it exists, sends no `config` in that report, and Odoo changes
@@ -285,8 +349,8 @@ route.
 whose id the GSettings key `inventory-pilot` holds, none by default. Only
 its replies' `config` is ever announced or applied; the others get
 `{"pilot": false}` and give nothing back. Odoo can set these keys of
-`streamdeck.conf`, and nothing else: no path, no environment variable, no
-command, no plugin to turn on.
+`streamdeck.conf` and the key layouts of `keymap.json`, and nothing else:
+no path, no environment variable, no command, no plugin to turn on.
 
 | Wire key | `streamdeck.conf` line | Values | Restart |
 |---|---|---|---|
@@ -294,10 +358,13 @@ command, no plugin to turn on.
 | `plugins_off` | `DECK_PLUGINS_OFF` | a list of at most 64 ids `[a-z][a-z0-9_]{0,63}`, written joined by `,` | yes |
 | `session_refresh_sec` | `DECK_SESSION_REFRESH_SEC` | a number from 0.5 to 60 | yes |
 | `games` | `GAMES` | `on`, `off` | no |
+| `key_layouts` | `keymap.json`, not a line | the layouts of item 10 of What ERPLibre relies on, for the decks connected | yes |
 
 - Reply `config`: `{"revision": <integer>, "hash": <64 lowercase hex>,
   "settings": {<key>: <value>}, "locked": [<key>], "ask": [<key>]}`.
-  `settings` are Odoo's values of the keys a layer sets; `locked` the
+  `settings` are Odoo's values of the keys a layer sets, and
+  `settings.key_layouts` `{<model>: {"keys": [<entry>]}}` for the models
+  of the decks connected; `locked` the
   keys the manager locked; `ask`, omitted when empty, the free keys
   whose local value Odoo asks the employee to keep or replace. A key of
   `locked` outside `settings`, or of `ask` outside `settings` or in
@@ -333,6 +400,27 @@ command, no plugin to turn on.
   one of them: after a `restart_failed` or `unit_missing` refusal, the
   revision stays offered until a click restarts the unit or finds it
   not running.
+- Key layouts: the layouts of `key_layouts` are checked against the
+  format of `keymap.json` when the reply comes, then against the catalog
+  the extension last read and the plugins turned off (`plugins_off` of
+  the revision, else the file's) when it comes and again at the click,
+  unless the revision is applied already, or answered by keeping the
+  local values and still asked: it writes nothing. One outside them
+  refuses the revision with `invalid:key_layouts`, and nothing is
+  written; no catalog read refuses every layout. `keymap.json`
+  is then rewritten, the revision and its layouts, after
+  `streamdeck.conf`: the layouts of `key_layouts` replace those of their
+  models, and the file's layouts of the other models (each an object
+  nesting 8 levels at most) are kept as they are, 16 models at most,
+  those of `key_layouts` first, then the file's in order: a layout Odoo
+  does not send stays the employee's. A `keymap.json` that exists but
+  cannot be read refuses the revision `write_failed` before any write.
+  When it cannot be written, `streamdeck.conf` is put
+  back as it was (removed when it did not exist) and the revision refused
+  `write_failed`. A change of either restarts the unit once. A
+  `keymap.json` holds the revision's layouts already when each model of
+  `key_layouts` hashes there as the revision's, whatever its other
+  models.
 - `result.reason` of a refusal is `invalid:<key>`, `<key>` a wire key
   of the table, `write_failed`, `restart_failed` or `unit_missing` (the
   program changed while no unit is installed: the file is written all
@@ -398,6 +486,12 @@ ERPLibre follows `main`: a MAJOR change is pushed on both sides together.
 The wire of the Odoo inventory is versioned by its `protocol` the same
 way, MAJOR for what Odoo can see, MINOR for an optional addition; this
 file's version moves with it.
+
+- **1.4:** the key layouts, protocol 1.2: the state carries
+  `deck_catalog`, the output of the deck program's `--catalog`; the
+  pilot reports the hashes of `keymap.json` and writes it from
+  `key_layouts`, keeping its layouts of the models Odoo does not send;
+  the keymap fixtures are shared with ERPLibre.
 
 - **1.3:** the Odoo configuration, protocol 1.1: the report carries
   `config` and `state.deck_plugins`, the pilot destination receives a

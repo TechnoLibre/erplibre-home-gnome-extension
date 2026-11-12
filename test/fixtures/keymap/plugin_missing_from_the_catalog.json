@@ -1,0 +1,41 @@
+{
+  "catalog": {
+    "format": 1,
+    "actions": [
+      "plugin:sound",
+      "plugin:timers",
+      "tiles",
+      "empty"
+    ],
+    "icons": [
+      "sound",
+      "tile",
+      "timer"
+    ],
+    "models": {
+      "006d": {
+        "cols": 5,
+        "rows": 3,
+        "keys": 15
+      },
+      "0084": {
+        "cols": 4,
+        "rows": 2,
+        "keys": 8
+      }
+    }
+  },
+  "plugins_off": [],
+  "layouts": {
+    "0084": {
+      "keys": [
+        {
+          "key": 0,
+          "action": "plugin:absent"
+        }
+      ]
+    }
+  },
+  "valid": false,
+  "loader": "problem"
+}

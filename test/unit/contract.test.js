@@ -22,7 +22,9 @@ import {INVENTORY_PROTOCOL, HEARTBEAT_S, TIMEOUT_S, POLL_S, QUEUE_MAX,
     workstationFingerprint, configBody} from '../../lib/inventory.js';
 import {CONFIG_KEYS, DECK_PROGRAMS, GAMES_VALUES, SESSION_REFRESH_RANGE,
     PLUGINS_OFF_MAX, PLUGIN_ID_RE, DECK_PLUGINS_MAX, REFUSAL_REASONS,
-    CHOICES, validateConfig} from '../../lib/deck-config.js';
+    CHOICES, validateConfig, KEYMAP_FORMAT, KEYMAP_MODELS_MAX, LABEL_MAX,
+    ICON_RE, CATALOG_MAX, LAYOUT_DEPTH_MAX, keymapText, validateKeyLayouts}
+    from '../../lib/deck-config.js';
 import {createHmac} from 'node:crypto';
 
 const ROOT = new URL('../../', import.meta.url);
@@ -299,12 +301,14 @@ test('the controller menu reaches the gallery the contract states', () => {
 // lib/inventory.js; the GJS modules (keyring, state file) are read as text,
 // since importing them needs the fakes of gjs-fake.js.
 
-test('the contract is at 1.3 since Odoo pilots the deck settings', () => {
-    assert.ok(CONTRACT.includes('**Contract version: 1.3**'));
-    assert.match(section('Versioning'), /^- \*\*1\.3:\*\* /m);
-    assert.match(section('Versioning'), /^- \*\*1\.2:\*\* /m);
+test('the contract is at 1.4 since Odoo lays out the home keys', () => {
+    assert.ok(CONTRACT.includes('**Contract version: 1.4**'));
+    for (const v of ['1\\.4', '1\\.3', '1\\.2']) {
+        assert.match(section('Versioning'),
+            new RegExp(`^- \\*\\*${v}:\\*\\* `, 'm'));
+    }
     const service = text('lib/inventory-service.js');
-    assert.ok(service.includes("export const CONTRACT_VERSION = '1.3';"));
+    assert.ok(service.includes("export const CONTRACT_VERSION = '1.4';"));
 });
 
 test('the extension relies on the Odoo routes of the inventory section', () => {
@@ -599,4 +603,96 @@ test('ERPLibre finds the pilot file and the shared fixtures the contract '
         assert.ok(reads.includes(`\`${key.line}=\``), key.line);
     assert.ok(reads.includes('`systemctl --user restart`'));
     assert.ok(reads.includes('`$XDG_CONFIG_HOME/erplibre-home/deck-plugins/`'));
+});
+
+// The key layouts (contract 1.4, protocol 1.2): keymap.json, the catalog
+// the deck program prints, and their place on the wire.
+
+test('the contract states keymap.json as deck-config.js writes it', () => {
+    const relies = section('What ERPLibre relies on').replace(/\s+/g, ' ');
+    const id = PLUGIN_ID_RE.source.slice(1, -1);
+    for (const fact of ['`~/.config/erplibre-home/keymap.json`',
+        'mode 0644, written by the extension only, in one atomic '
+            + 'replacement',
+        `\`{"format": ${KEYMAP_FORMAT}, "revision": <integer>, "layouts": `
+            + '{<model>: {"keys": [<entry>]}}}`',
+        `4 lowercase hex digits, ${KEYMAP_MODELS_MAX} models at most`,
+        '`{"key": <integer>, "action": <action>, "icon": <icon>, '
+            + '"label": <text>}`',
+        '`icon` and `label` optional and never null, and no other key',
+        'at most as many entries as the model has keys',
+        `\`plugin:<id>\` (the home key of that plugin, \`<id>\` of the `
+            + `pattern \`${id}\`)`,
+        '`tiles` (a key of the dashboard) or `empty` (a black key)',
+        'each `plugin:<id>` once in a layout',
+        `at most ${LABEL_MAX} characters, counted by code point, none of `
+            + 'the Unicode categories Cc or Cs',
+        '`test/fixtures/keymap/<name>.json`',
+        'A valid case is never `problem`'])
+        assert.ok(relies.includes(fact), fact);
+    // What the extension writes is the shape stated.
+    const layouts = {'0084': {keys: [{key: 0, action: 'tiles'}]}};
+    assert.deepEqual(Object.keys(JSON.parse(keymapText(3, layouts))),
+        ['format', 'revision', 'layouts']);
+    const dir = new URL('test/fixtures/keymap/', ROOT);
+    const names = readdirSync(dir);
+    assert.ok(names.length > 0);
+    for (const f of names) {
+        const fx = JSON.parse(text(`test/fixtures/keymap/${f}`));
+        assert.deepEqual(Object.keys(fx), ['catalog', 'plugins_off',
+            'layouts', 'valid', 'loader'], f);
+        for (const part of ['`catalog`', '`plugins_off`', '`layouts`',
+            '`valid`', '`loader`', `\`${fx.loader}\``])
+            assert.ok(relies.includes(part), part);
+        assert.equal(validateKeyLayouts(fx.layouts, fx.catalog,
+            fx.plugins_off).ok, fx.valid, f);
+    }
+});
+
+test('the contract states the catalog the deck program prints', () => {
+    const reads = section('What the extension relies on')
+        .replace(/\s+/g, ' ');
+    for (const fact of [
+        '`.venv.streamdeck/bin/python script/stream_deck/erplibre_streamdeck '
+            + '--catalog`',
+        'prints the catalog of the deck program as JSON and exits 0, '
+            + 'without opening a deck nor taking the deck lock',
+        `\`{"format": ${KEYMAP_FORMAT}, "actions": [<action>], "icons": `
+            + '[<icon>], "models": {<model>: {"cols": <integer>, "rows": '
+            + '<integer>, "keys": <integer>}}}`',
+        `icon names of the pattern \`${ICON_RE.source.slice(1, -1)}\``,
+        'at its start and when the checkout\'s commit changes',
+        `abandons it after ${TIMEOUT_S} s`])
+        assert.ok(reads.includes(fact), fact);
+    const service = text('lib/inventory-service.js');
+    assert.ok(service.includes("'script/stream_deck/erplibre_streamdeck'"));
+    assert.ok(service.includes("'--catalog'"));
+});
+
+test('the inventory section states the key layouts on the wire', () => {
+    const state = item('Odoo inventory', '`state`');
+    assert.ok(state.includes('`deck_catalog`, the catalog the deck program '
+        + `printed, left out when there is none or past ${CATALOG_MAX / 1024}`
+        + ' KiB of JSON'));
+    const body = item('Odoo inventory', '`config`');
+    for (const fact of ['`current.key_layouts` holds, for each model of '
+        + '`keymap.json` (16 at most, in order), the sha256 of its layout',
+    '`json.dumps(layout, sort_keys=True, separators=(",", ":"))`',
+    'null for a layout that is not an object or that nests lists and '
+        + `objects more than ${LAYOUT_DEPTH_MAX} levels deep`,
+    'null without a `keymap.json` of format 1'])
+        assert.ok(body.includes(fact), fact);
+    assert.match(section('Odoo inventory'),
+        /^\| `key_layouts` \| `keymap\.json`.+ \| yes \|$/m);
+    const reply = item('Odoo inventory', 'Reply `config`');
+    assert.ok(reply.includes('`settings.key_layouts`'));
+    const layouts = item('Odoo inventory', 'Key layouts');
+    for (const fact of ['refuses the revision with `invalid:key_layouts`',
+        'no catalog read refuses every layout',
+        '`streamdeck.conf` is put back as it was',
+        'restarts the unit once',
+        'when it comes and again at the click',
+        'unless the revision is applied already, or answered by keeping '
+            + 'the local values and still asked: it writes nothing'])
+        assert.ok(layouts.includes(fact), fact);
 });
