@@ -191,6 +191,18 @@ service.
 `$XDG_STATE_HOME/erplibre-home/pilot.json` dit au menu TODO d'ERPLibre
 quels réglages Odoo a verrouillés.
 
+Odoo peut aussi disposer les touches d'accueil de chaque modèle de deck :
+quelle touche ouvre quel plugin, lesquelles portent le tableau de bord,
+lesquelles restent noires, avec une icône et un libellé. L'extension
+envoie à Odoo le catalogue du programme du deck du checkout (ses plugins
+à touche d'accueil, ses icônes, la géométrie de chaque modèle), lu à son
+démarrage et quand le commit du checkout change. Une disposition dont le
+catalogue ne permet pas l'action, l'icône ou la touche, ou qui nomme un
+plugin coupé, refuse la révision ; au clic,
+`~/.config/erplibre-home/keymap.json` est écrit avec `streamdeck.conf`,
+les deux ou aucun, avant un seul redémarrage du service du deck, qui le
+lit à son démarrage.
+
 ## Pastilles de comptage
 
 Chaque indicateur visible affiche une petite pastille circulaire sur

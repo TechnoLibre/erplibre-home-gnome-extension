@@ -8,6 +8,17 @@ migrations that are not auto-applied.
 ## [Unreleased]
 
 ### Added
+- Odoo key layouts (contract 1.4, protocol 1.2): the report carries
+  `state.deck_catalog`, the output of the deck program's `--catalog`
+  (run with the checkout's Stream Deck venv at the start and when the
+  checkout's commit changes, abandoned after 10 s, left out past 32 KiB),
+  and the pilot's `current.key_layouts`, the sha256 of each layout of
+  `~/.config/erplibre-home/keymap.json`. A revision's `key_layouts` is
+  checked against the format and the catalog when it comes and at the
+  click (`invalid:key_layouts` otherwise), then `keymap.json` is written,
+  mode 0644, after `streamdeck.conf`, which is put back when it cannot
+  be, before one restart of the deck unit. The fixtures of
+  `test/fixtures/keymap/` are shared with ERPLibre.
 - Odoo configuration, applied: a destination switched on as **Pilot** in
   the preferences (one at most, none by default) may configure the
   Stream Deck. A new revision is announced once, by a notification, an

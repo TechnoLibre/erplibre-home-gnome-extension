@@ -103,7 +103,12 @@ and, for the inventory tokens, the GNOME keyring.
    calls `applyConfig` (rewrite through `rewriteConf`, atomic, then
    `systemctl --user restart` when needed) or `keepLocal`; the result or
    the choice goes in a report sent at once, and `pilot.json` names the
-   locked keys for ERPLibre.
+   locked keys for ERPLibre. The key layouts ride the same path: the
+   catalog of the deck program (`--catalog`, read once per checkout
+   commit) goes in each `state`, a revision's `key_layouts` is checked
+   against it (`validateKeyLayouts`) when it comes and at the click, and
+   `keymap.json` is written after `streamdeck.conf`, which is put back
+   when it cannot be, before the one restart.
 
 The wire protocol is in `CONTRACT.md`, section « Odoo inventory ».
 
@@ -117,7 +122,7 @@ The wire protocol is in `CONTRACT.md`, section « Odoo inventory ».
 | Indicator | `indicators/pencil.js` | Lazy import so node tests can read `lib/`. |
 | D-Bus | `extension.js` | Interface `org.gnome.Shell.Extensions.ERPLibreHome` exposes `FocusClaudeSession`, `GetFocusedWindowId`, `AcceptClaudeSession`, `SetClaudeSessionWindow`, `KillClaudeSession`, `RenameClaudeSession`, `DebugClaudeIndex`, `ListMpvSessions`, `MpvSendCommand`, `TileWindow`, `OpenPath`, `OpenMedia`, etc. |
 | Driver | `script/stream_deck/erplibre_streamdeck/` (package, one plugin per feature) | Python streamdeck library, reads the same state directories, calls back into the extension over D-Bus. |
-| Inventory | `lib/inventory.js`, `lib/deck-config.js` | Pure: URL policy, fingerprint, wire state and events, `EventQueue`, report and enrollment bodies and replies; the Odoo configuration's keys, validation and `streamdeck.conf` rewrite. Unit-tested. |
+| Inventory | `lib/inventory.js`, `lib/deck-config.js` | Pure: URL policy, fingerprint, wire state and events, `EventQueue`, report and enrollment bodies and replies; the Odoo configuration's keys, validation and `streamdeck.conf` rewrite; the key layouts' format, catalog, `keymap.json` text and hashes. Unit-tested. |
 | Inventory service | `lib/inventory-service.js`, `lib/usb-watch.js`, `lib/odoo-http.js`, `lib/secret-store.js` | Runs in GNOME Shell; asynchronous only, the application of the pilot's configuration included. Tested on the fakes of `test/unit/gjs-fake.js`. |
 | Inventory preferences | `lib/inventory-prefs.js`, `prefs.js` | Destinations, enrollment, status, the pilot and its pending revision; runs in the preferences process and never writes `streamdeck.conf`. |
 

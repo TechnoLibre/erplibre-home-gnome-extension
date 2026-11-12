@@ -26,6 +26,12 @@ const FACTS = {hostname: 'host-invented', os: {name: 'Debian GNU/Linux',
     version: '13'}, erplibre: {branch: 'main', commit: 'abc123'},
 deckProgram: 'tiler'};
 
+// The catalog `--catalog` prints for the tests: a deck model of 8 keys.
+const CATALOG = {format: 1,
+    actions: ['plugin:sound', 'plugin:timers', 'tiles', 'empty'],
+    icons: ['sound', 'tile', 'timer'],
+    models: {'0084': {cols: 4, rows: 2, keys: 8}}};
+
 let h = null;
 
 beforeEach(() => fake.reset());
@@ -62,6 +68,10 @@ function harness({dests = [D1], tokens = {d1: TOKEN}, start = true,
         factsHang: false,
         clockMs: 0,
         now: '2026-03-01T10:00:00.000Z',
+        // What `--catalog` prints; each reading's cancellable.
+        catalogText: `${JSON.stringify(CATALOG)}\n`,
+        catalogReads: [],
+        catalogHang: false,
         usb: {started: 0, stopped: 0, rescans: 0, cb: null,
             emit(decks) { this.cb(decks.map(d => ({...d}))); }},
     };
@@ -97,6 +107,11 @@ function harness({dests = [D1], tokens = {d1: TOKEN}, start = true,
             if (h.serviceUnreadable) return Promise.resolve(unreadable);
             return h.serviceHang ? new Promise(() => {})
                 : Promise.resolve(h.serviceState);
+        },
+        readCatalog: cancellable => {
+            h.catalogReads.push(cancellable);
+            return h.catalogHang ? new Promise(() => {})
+                : Promise.resolve(h.catalogText);
         },
         clockMs: () => h.clockMs,
         now: () => h.now,
@@ -178,6 +193,7 @@ test('the first scan sends the full state, without events', async () => {
                     firmware: null},
             ],
             deck_plugins: [],
+            deck_catalog: CATALOG,
         },
         events: [],
         lost_events: 0,
@@ -1459,13 +1475,15 @@ test('the pilot body carries the local values, read again at each report',
         await piloted({conf: 'DECK_PROGRAM=controller\nGAMES=bad\n'});
         assert.deepEqual(h.calls[0].body.config, {pilot: true,
             revision_applied: null, current: {deck_program: 'controller',
-                plugins_off: null, session_refresh_sec: null, games: null},
+                plugins_off: null, session_refresh_sec: null, games: null,
+                key_layouts: null},
             result: null, choice: null});
         await reply(0, ok());
         deckConf('DECK_PROGRAM=none\nDECK_SESSION_REFRESH_SEC=2.5\n');
         const next = await heartbeat();
         assert.deepEqual(next.body.config.current, {deck_program: 'none',
-            plugins_off: null, session_refresh_sec: 2.5, games: null});
+            plugins_off: null, session_refresh_sec: 2.5, games: null,
+            key_layouts: null});
     });
 
 test('only_the_pilot_destination_is_applied', async () => {
@@ -2171,3 +2189,321 @@ test('the preferences ask through inventory-apply-request, cleared after',
         assert.match(confText(), /^DECK_SESSION_REFRESH_SEC=5$/m);
         assert.equal(h.calls.at(-1).body.config.choice, 'keep_local');
     });
+
+// ------------------------------------------- key layouts (contract 1.4)
+
+const {layoutHash, keymapText} = await import('../../lib/deck-config.js');
+
+const LAYOUTS = {'0084': {keys: [
+    {key: 0, action: 'plugin:timers', icon: 'timer', label: 'Minuteries'},
+    {key: 1, action: 'tiles'}, {key: 2, action: 'empty'}]}};
+
+function keymapPath() {
+    return path.join(fake.env.HOME, '.config', 'erplibre-home',
+        'keymap.json');
+}
+
+const keymapExists = () => fs.existsSync(keymapPath());
+const readKeymap = () => JSON.parse(fs.readFileSync(keymapPath(), 'utf8'));
+
+function writeKeymap(text) {
+    fs.mkdirSync(path.dirname(keymapPath()), {recursive: true});
+    fs.writeFileSync(keymapPath(), text);
+}
+
+test('the catalog is the deck program\'s --catalog of the checkout',
+    async () => {
+        const root = '/srv/invented-erplibre';
+        assert.deepEqual(svc.catalogArgv(root), [
+            `${root}/.venv.streamdeck/bin/python`,
+            `${root}/script/stream_deck/erplibre_streamdeck`, '--catalog']);
+        fake.onSpawn = argv => {
+            if (argv[0] === 'realpath')
+                return {stdout: `${EXT_REAL}/extension.js\n`};
+            if (argv.at(-1) === '--catalog') return {stdout: '{"x": 1}\n'};
+            return {exit: 1};
+        };
+        assert.equal(await svc.readCatalog({extensionPath: EXT_LINK}),
+            '{"x": 1}\n');
+        assert.deepEqual(fake.spawned.at(-1).argv, svc.catalogArgv(root));
+        fake.spawned = [];
+        fake.onSpawn = argv => (argv[0] === 'realpath'
+            ? {stdout: '/srv/invented-ext/extension.js\n'} : {});
+        assert.equal(await svc.readCatalog({extensionPath: EXT_LINK}), null);
+        assert.deepEqual(fake.spawned.map(s => s.argv[0]), ['realpath'],
+            'outside a checkout, nothing is run');
+        assert.equal(svc.keymapFilePath('/home/invented'),
+            '/home/invented/.config/erplibre-home/keymap.json');
+    });
+
+test('the_catalog_is_read_once_per_commit', async () => {
+    harness();
+    h.usb.emit([DECK_A]);
+    await settle(40);
+    assert.equal(h.catalogReads.length, 1);
+    assert.deepEqual(h.calls[0].body.state.deck_catalog, CATALOG);
+    assert.equal(h.calls[0].body.protocol, '1.2');
+    await reply(0, ok());
+    // The facts read again a minute later, the commit the same.
+    h.clockMs += 61 * 1000;
+    let next = await heartbeat();
+    assert.equal(h.factsReads.length, 2);
+    assert.equal(h.catalogReads.length, 1, 'same commit: not read again');
+    assert.deepEqual(next.body.state.deck_catalog, CATALOG);
+    await reply(h.calls.indexOf(next), ok());
+    h.facts = {...FACTS, erplibre: {branch: 'main', commit: 'def456'}};
+    h.catalogText = JSON.stringify({...CATALOG, icons: ['timer']});
+    h.clockMs += 61 * 1000;
+    next = await heartbeat();
+    assert.equal(h.catalogReads.length, 2, 'a new commit: read again');
+    assert.deepEqual(next.body.state.deck_catalog.icons, ['timer']);
+});
+
+test('a_catalog_that_times_out_is_left_out', async () => {
+    harness();
+    h.catalogHang = true;
+    h.usb.emit([DECK_A]);
+    await settle(40);
+    assert.equal(h.calls.length, 0, 'the report waits for the catalog');
+    for (const t of liveMs(TIMEOUT_S * 1000)) fire(t);
+    await settle(40);
+    assert.equal(h.calls.length, 1, 'then goes without it');
+    assert.equal(Object.hasOwn(h.calls[0].body.state, 'deck_catalog'), false);
+    assert.equal(h.catalogReads[0].is_cancelled(), true,
+        'the program is killed');
+    await reply(0, ok());
+    h.catalogHang = false;
+    h.clockMs += 61 * 1000;
+    const next = await heartbeat();
+    assert.equal(h.catalogReads.length, 1, 'not tried again for that commit');
+    assert.equal(Object.hasOwn(next.body.state, 'deck_catalog'), false);
+});
+
+test('a catalog that does not parse, or past 32 KiB, is left out',
+    async () => {
+        harness();
+        h.catalogText = 'Traceback (most recent call last):';
+        h.usb.emit([DECK_A]);
+        await settle(40);
+        assert.equal(Object.hasOwn(h.calls[0].body.state, 'deck_catalog'),
+            false);
+        await reply(0, ok());
+        h.facts = {...FACTS, erplibre: {branch: 'main', commit: 'big'}};
+        h.catalogText = JSON.stringify({...CATALOG, icons: Array.from(
+            {length: 4000}, (_, i) => `icon_${i}`)});
+        h.clockMs += 61 * 1000;
+        const next = await heartbeat();
+        assert.equal(Object.hasOwn(next.body.state, 'deck_catalog'), false);
+    });
+
+test('the pilot body carries the hash of each layout of keymap.json',
+    async () => {
+        writeKeymap(keymapText(2, LAYOUTS));
+        await piloted();
+        assert.deepEqual(h.calls[0].body.config.current.key_layouts,
+            {'0084': layoutHash(LAYOUTS['0084'])});
+        await reply(0, ok());
+        fs.rmSync(keymapPath());
+        const next = await heartbeat();
+        assert.equal(next.body.config.current.key_layouts, null,
+            'no file: no layout');
+    });
+
+test('apply writes keymap.json, 0644, with the revision and the layouts',
+    async () => {
+        await piloted();
+        const conf = fs.statSync(confPath());
+        await offer(0, config(3, {games: 'on', key_layouts: LAYOUTS},
+            {locked: ['key_layouts']}));
+        assert.deepEqual(h.announced.map(p => p.keys), [['key_layouts']]);
+        const r = await h.service.applyConfig('d1', 3);
+        assert.equal(fs.statSync(confPath()).ino, conf.ino,
+            'streamdeck.conf, which holds its values, is not rewritten');
+        assert.deepEqual(r, {revision: 3, status: 'applied', reason: null,
+            at: h.now});
+        assert.deepEqual(readKeymap(), {format: 1, revision: 3,
+            layouts: LAYOUTS});
+        assert.equal(fs.statSync(keymapPath()).mode & 0o777, 0o644);
+        assert.deepEqual(fs.readdirSync(path.dirname(keymapPath())),
+            ['keymap.json'], 'no temporary file left');
+        assert.deepEqual(restarts(), [RESTART], 'read by the deck at start');
+        assert.match(confText(), /^GAMES=on$/m);
+        await settle(40);
+        assert.deepEqual(h.calls[1].body.config.current.key_layouts,
+            {'0084': layoutHash(LAYOUTS['0084'])}, 'the file read again');
+        // A keymap.json of another mode becomes 0644 too.
+        fs.chmodSync(keymapPath(), 0o600);
+        await offer(1, config(4, {key_layouts: {}}));
+        await h.service.applyConfig('d1', 4);
+        assert.equal(fs.statSync(keymapPath()).mode & 0o777, 0o644);
+        assert.deepEqual(readKeymap().layouts, {});
+    });
+
+test('a keymap.json that holds the layouts is applied silently', async () => {
+    writeKeymap(keymapText(1, LAYOUTS));
+    const mtime = fs.statSync(keymapPath()).mtimeMs;
+    await piloted();
+    await offer(0, config(3, {games: 'on', key_layouts: LAYOUTS}));
+    assert.deepEqual(h.announced, []);
+    assert.equal(h.calls[1].body.config.result.status, 'applied');
+    assert.equal(fs.statSync(keymapPath()).mtimeMs, mtime);
+    assert.deepEqual(restarts(), []);
+});
+
+test('one_restart_for_conf_and_keymap', async () => {
+    await piloted();
+    let atRestart = null;
+    fake.onSpawn = argv => {
+        if (argv.includes('restart'))
+            atRestart = [confText(), keymapExists()];
+        return {};
+    };
+    await offer(0, config(3, {deck_program: 'controller',
+        key_layouts: LAYOUTS}));
+    assert.deepEqual(h.announced.map(p => p.keys),
+        [['deck_program', 'key_layouts']]);
+    const r = await h.service.applyConfig('d1', 3);
+    assert.equal(r.status, 'applied');
+    assert.deepEqual(restarts(), [RESTART], 'one restart for both');
+    assert.match(atRestart[0], /^DECK_PROGRAM=controller$/m);
+    assert.equal(atRestart[1], true, 'both written before it');
+});
+
+test('conf_and_keymap_are_written_together_or_not_at_all', async () => {
+    await piloted();
+    fs.chmodSync(confPath(), 0o640);
+    const before = confBytes();
+    await offer(0, config(3, {deck_program: 'controller',
+        key_layouts: LAYOUTS}));
+    const dir = path.dirname(keymapPath());
+    fs.mkdirSync(dir, {recursive: true});
+    fs.chmodSync(dir, 0o555);
+    let r;
+    try {
+        r = await h.service.applyConfig('d1', 3);
+    } finally {
+        fs.chmodSync(dir, 0o755);
+    }
+    assert.deepEqual(r, {revision: 3, status: 'refused',
+        reason: 'write_failed', at: h.now});
+    assert.deepEqual(confBytes(), before, 'streamdeck.conf put back');
+    assert.equal(fs.statSync(confPath()).mode & 0o777, 0o640);
+    assert.equal(keymapExists(), false);
+    assert.deepEqual(restarts(), []);
+    assert.equal(h.service.pendingConfig().revision, 3, 'still offered');
+    // A conf that did not exist is removed again.
+    fs.rmSync(confPath());
+    fs.chmodSync(dir, 0o555);
+    try {
+        r = await h.service.applyConfig('d1', 3);
+    } finally {
+        fs.chmodSync(dir, 0o755);
+    }
+    assert.equal(r.reason, 'write_failed');
+    assert.equal(fs.existsSync(confPath()), false);
+    // And together once the directory takes it.
+    r = await h.service.applyConfig('d1', 3);
+    assert.equal(r.status, 'applied');
+    assert.match(confText(), /^DECK_PROGRAM=controller$/m);
+    assert.deepEqual(readKeymap().layouts, LAYOUTS);
+});
+
+test('a layout the catalog does not allow refuses the revision at once',
+    async () => {
+        await piloted();
+        const timersOff = config(3, {plugins_off: ['timers'],
+            key_layouts: LAYOUTS});
+        await offer(0, timersOff);
+        assert.deepEqual(h.announced, []);
+        assert.equal(h.service.pendingConfig(), null);
+        assert.deepEqual(h.calls[1].body.config.result, {revision: 3,
+            status: 'refused', reason: 'invalid:key_layouts', at: h.now});
+        assert.equal(keymapExists(), false);
+        // The conf turning timers off counts too, when Odoo does not set it.
+        await reply(1, ok());
+        deckConf(`${CONF}DECK_PLUGINS_OFF=timers\n`);
+        const next = await heartbeat();
+        await offer(h.calls.indexOf(next), config(4, {key_layouts: LAYOUTS}));
+        assert.equal(h.calls.at(-1).body.config.result.reason,
+            'invalid:key_layouts');
+    });
+
+test('a_layout_action_outside_the_catalog_refuses', async () => {
+    // A checkout older than the layout: its program knows no timers.
+    harness({pilot: 'd1'});
+    h.catalogText = JSON.stringify({...CATALOG,
+        actions: ['plugin:sound', 'tiles', 'empty']});
+    h.announced = [];
+    h.service.connect('announce', p => h.announced.push(p));
+    deckConf(CONF);
+    h.usb.emit([DECK_A]);
+    await settle(40);
+    await offer(0, config(3, {key_layouts: LAYOUTS}));
+    assert.deepEqual(h.announced, []);
+    assert.deepEqual(h.calls[1].body.config.result, {revision: 3,
+        status: 'refused', reason: 'invalid:key_layouts', at: h.now});
+    assert.equal(keymapExists(), false, 'no key the deck would ignore');
+});
+
+test('the catalog is checked again at the click', async () => {
+    // An offer kept by the state file, clicked after a restart on a
+    // checkout whose program no longer knows the timers plugin, before
+    // Odoo's reply checks it again.
+    await piloted();
+    await offer(0, config(3, {key_layouts: LAYOUTS}));
+    assert.equal(h.service.pendingConfig().revision, 3);
+    h.service.stop();
+    await settle();
+    harness({pilot: 'd1'});
+    h.catalogText = JSON.stringify({...CATALOG, actions: ['tiles', 'empty']});
+    h.usb.emit([DECK_A]);
+    await settle(40);
+    assert.equal(h.calls.length, 1, 'its reply not in yet');
+    assert.equal(h.service.pendingConfig().revision, 3, 'kept');
+    const r = await h.service.applyConfig('d1', 3);
+    assert.deepEqual(r, {revision: 3, status: 'refused',
+        reason: 'invalid:key_layouts', at: h.now});
+    assert.equal(keymapExists(), false);
+});
+
+test('a layout refused by a catalog is reconsidered with the next one',
+    async () => {
+        harness({pilot: 'd1'});
+        h.catalogText = JSON.stringify({...CATALOG,
+            actions: ['tiles', 'empty']});
+        h.announced = [];
+        h.service.connect('announce', p => h.announced.push(p));
+        deckConf(CONF);
+        h.usb.emit([DECK_A]);
+        await settle(40);
+        await offer(0, config(3, {key_layouts: LAYOUTS}));
+        assert.equal(h.calls[1].body.config.result.reason,
+            'invalid:key_layouts');
+        await offer(1, config(3, {key_layouts: LAYOUTS}));
+        assert.equal(h.calls.length, 2, 'refused once for that catalog');
+        // The checkout moves to a commit whose program knows timers: the
+        // same revision, which Odoo has no reason to move, is offered.
+        h.facts = {...FACTS, erplibre: {branch: 'main', commit: 'newer'}};
+        h.catalogText = JSON.stringify(CATALOG);
+        h.clockMs += 61 * 1000;
+        const next = await heartbeat();
+        await offer(h.calls.indexOf(next), config(3, {key_layouts: LAYOUTS}));
+        assert.deepEqual(h.announced.map(p => p.revision), [3]);
+        assert.equal((await h.service.applyConfig('d1', 3)).status,
+            'applied');
+        assert.deepEqual(readKeymap().layouts, LAYOUTS);
+    });
+
+test('a click rewrites only the file whose values change', async () => {
+    await piloted();
+    await offer(0, config(3, {deck_program: 'controller',
+        key_layouts: LAYOUTS}));
+    // keymap.json takes the layouts between the offer and the click.
+    writeKeymap(keymapText(1, LAYOUTS));
+    const ino = fs.statSync(keymapPath()).ino;
+    const r = await h.service.applyConfig('d1', 3);
+    assert.equal(r.status, 'applied');
+    assert.equal(fs.statSync(keymapPath()).ino, ino, 'not rewritten');
+    assert.equal(readKeymap().revision, 1);
+    assert.match(confText(), /^DECK_PROGRAM=controller$/m);
+});
