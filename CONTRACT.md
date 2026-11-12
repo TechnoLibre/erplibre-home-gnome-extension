@@ -322,7 +322,9 @@ route.
   `json.dumps(layout, sort_keys=True, separators=(",", ":"))`, keys
   sorted, no white space, every character outside printable ASCII
   escaped as `\uXXXX` in lowercase hex. It holds null for a layout that
-  is not an object, and is null without a `keymap.json` of format 1.
+  is not an object or that nests lists and objects more than 8 levels
+  deep (the format nests 3), and is null without a `keymap.json` of
+  format 1.
   `choice` is the employee's answer to an `ask`, sent once, in the
   report that follows it. A pilot that cannot read `streamdeck.conf`,
   though it exists, sends no `config` in that report, and Odoo changes

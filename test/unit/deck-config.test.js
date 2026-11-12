@@ -505,6 +505,29 @@ test('layoutHashes reads keymap.json, null when it holds no format 1', () => {
         '0084': null});
 });
 
+test('a layout nested past the bound hashes as null, never throws', () => {
+    // 100 000 levels fit in 256 KiB: hashed as they come, they would
+    // exhaust the stack of GJS and node alike, and with it every report.
+    const n = 100000;
+    const deep = `{"format": 1, "layouts": {"0084": {"keys": `
+        + `${'['.repeat(n)}${']'.repeat(n)}}, "006d": {"keys": []}}}`;
+    assert.ok(deep.length < 256 * 1024);
+    assert.deepEqual(layoutHashes(deep), {'006d': layoutHash({keys: []}),
+        '0084': null});
+    assert.deepEqual(readLocal('', deep).key_layouts['0084'], null);
+    // The format nests 3 levels; up to 8 a layout of another shape still
+    // hashes, past it gives null.
+    const nested = depth => {
+        let v = 1;
+        for (let i = 1; i < depth; i++) v = [v];
+        return {keys: v};
+    };
+    const at = depth => layoutHashes(JSON.stringify({format: 1,
+        layouts: {'0084': nested(depth)}}))['0084'];
+    assert.equal(at(8), layoutHash(nested(8)));
+    assert.equal(at(9), null);
+});
+
 test('readLocal adds the layout hashes to the values of the conf', () => {
     const local = readLocal('GAMES=off\n', keymapText(1, LAYOUTS));
     assert.deepEqual(local, {...readCurrent('GAMES=off\n'),

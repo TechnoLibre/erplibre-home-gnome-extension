@@ -23,7 +23,7 @@ import {INVENTORY_PROTOCOL, HEARTBEAT_S, TIMEOUT_S, POLL_S, QUEUE_MAX,
 import {CONFIG_KEYS, DECK_PROGRAMS, GAMES_VALUES, SESSION_REFRESH_RANGE,
     PLUGINS_OFF_MAX, PLUGIN_ID_RE, DECK_PLUGINS_MAX, REFUSAL_REASONS,
     CHOICES, validateConfig, KEYMAP_FORMAT, KEYMAP_MODELS_MAX, LABEL_MAX,
-    ICON_RE, CATALOG_MAX, keymapText, validateKeyLayouts}
+    ICON_RE, CATALOG_MAX, LAYOUT_DEPTH_MAX, keymapText, validateKeyLayouts}
     from '../../lib/deck-config.js';
 import {createHmac} from 'node:crypto';
 
@@ -676,7 +676,8 @@ test('the inventory section states the key layouts on the wire', () => {
     for (const fact of ['`current.key_layouts` holds, for each model of '
         + '`keymap.json` (16 at most, in order), the sha256 of its layout',
     '`json.dumps(layout, sort_keys=True, separators=(",", ":"))`',
-    'null for a layout that is not an object',
+    'null for a layout that is not an object or that nests lists and '
+        + `objects more than ${LAYOUT_DEPTH_MAX} levels deep`,
     'null without a `keymap.json` of format 1'])
         assert.ok(body.includes(fact), fact);
     assert.match(section('Odoo inventory'),

@@ -2309,6 +2309,17 @@ test('the pilot body carries the hash of each layout of keymap.json',
             'no file: no layout');
     });
 
+test('a keymap.json nested too deep for a stack still lets reports go',
+    async () => {
+        const n = 100000;
+        writeKeymap(`{"format": 1, "layouts": {"0084": {"keys": `
+            + `${'['.repeat(n)}${']'.repeat(n)}}}}`);
+        await piloted();
+        assert.equal(h.calls.length, 1, 'the report went');
+        assert.deepEqual(h.calls[0].body.config.current.key_layouts,
+            {'0084': null});
+    });
+
 test('apply writes keymap.json, 0644, with the revision and the layouts',
     async () => {
         await piloted();
