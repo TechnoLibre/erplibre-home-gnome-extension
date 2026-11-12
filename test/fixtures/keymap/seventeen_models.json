@@ -79,5 +79,6 @@
       "keys": []
     }
   },
-  "valid": false
+  "valid": false,
+  "loader": "automatic"
 }

@@ -169,10 +169,19 @@ check it.
     `DECK_PLUGINS_OFF` turns off.
 11. **Shared keymap fixtures.** `test/fixtures/keymap/<name>.json` holds
     `catalog` (as `--catalog` prints it), `plugins_off` (the plugins
-    turned off), `layouts` (a reply's `settings.key_layouts`) and `valid`,
-    whether the extension writes those layouts. ERPLibre's loader of
-    `keymap.json` finds no problem in a valid case, and one at least in
-    the others.
+    turned off), `layouts` (a reply's `settings.key_layouts`), `valid`,
+    whether the extension writes those layouts, and `loader`, what
+    ERPLibre's loader does with a `keymap.json` that holds them: read by
+    its `load`, then laid out by its `layout_for` on each model of the
+    catalog, with the plugins that layout names loaded with a home button
+    unless the catalog lacks them or `plugins_off` turns them off.
+    `problem`: `layout_for` gives one problem at least. `automatic`: it
+    gives none and keeps the automatic layout of every model (a model it
+    does not find, or a file `load` refuses). `as_sent`: it gives none and
+    lays out the entries (a field it does not know is ignored). A valid
+    case is never `problem`: the deck skips nothing the extension
+    writes. An invalid case may be any of the three, the extension being
+    the stricter reader.
 
 ## What the extension relies on
 

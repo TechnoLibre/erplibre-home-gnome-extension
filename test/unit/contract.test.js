@@ -627,7 +627,8 @@ test('the contract states keymap.json as deck-config.js writes it', () => {
         'each `plugin:<id>` once in a layout',
         `at most ${LABEL_MAX} characters, counted by code point, none of `
             + 'the Unicode categories Cc or Cs',
-        '`test/fixtures/keymap/<name>.json`'])
+        '`test/fixtures/keymap/<name>.json`',
+        'A valid case is never `problem`'])
         assert.ok(relies.includes(fact), fact);
     // What the extension writes is the shape stated.
     const layouts = {'0084': {keys: [{key: 0, action: 'tiles'}]}};
@@ -639,9 +640,9 @@ test('the contract states keymap.json as deck-config.js writes it', () => {
     for (const f of names) {
         const fx = JSON.parse(text(`test/fixtures/keymap/${f}`));
         assert.deepEqual(Object.keys(fx), ['catalog', 'plugins_off',
-            'layouts', 'valid'], f);
+            'layouts', 'valid', 'loader'], f);
         for (const part of ['`catalog`', '`plugins_off`', '`layouts`',
-            '`valid`'])
+            '`valid`', '`loader`', `\`${fx.loader}\``])
             assert.ok(relies.includes(part), part);
         assert.equal(validateKeyLayouts(fx.layouts, fx.catalog,
             fx.plugins_off).ok, fx.valid, f);

@@ -27,5 +27,6 @@
   },
   "plugins_off": [],
   "layouts": [],
-  "valid": false
+  "valid": false,
+  "loader": "automatic"
 }

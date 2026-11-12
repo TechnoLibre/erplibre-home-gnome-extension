@@ -330,10 +330,13 @@ test('games_alone_needs_no_restart', () => {
 // Key layouts (contract 1.4, protocol 1.2): keymap.json, written from the
 // reply's `settings.key_layouts` once each layout passes the format rules
 // and the catalog the deck program printed. The fixtures of
-// test/fixtures/keymap/ are shared with ERPLibre, whose loader gives the
-// same verdict on them.
+// test/fixtures/keymap/ are shared with ERPLibre: each states what its
+// loader does with them.
 
 const KEYMAP_FIXTURES = new URL('../fixtures/keymap/', import.meta.url);
+// What ERPLibre's loader does with a fixture's layouts (CONTRACT.md,
+// item 11 of What ERPLibre relies on).
+const LOADER_VERDICTS = ['problem', 'automatic', 'as_sent'];
 
 function keymapFixtures() {
     return readdirSync(KEYMAP_FIXTURES).filter(f => f.endsWith('.json'))
@@ -365,7 +368,10 @@ test('the shared keymap fixtures give their verdict', () => {
     assert.ok(all.some(f => f.valid) && all.some(f => !f.valid));
     for (const f of all) {
         assert.deepEqual(Object.keys(f), ['name', 'catalog', 'plugins_off',
-            'layouts', 'valid'], f.name);
+            'layouts', 'valid', 'loader'], f.name);
+        assert.ok(LOADER_VERDICTS.includes(f.loader), f.name);
+        // What the extension writes, the deck lays out without a problem.
+        assert.ok(!f.valid || f.loader !== 'problem', f.name);
         assert.deepEqual(validateKeyLayouts(f.layouts, f.catalog,
             f.plugins_off), f.valid ? {ok: true, reason: null} : REFUSED,
         f.name);

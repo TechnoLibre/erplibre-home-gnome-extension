@@ -35,5 +35,6 @@
       ]
     }
   },
-  "valid": false
+  "valid": false,
+  "loader": "problem"
 }

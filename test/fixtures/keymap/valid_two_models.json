@@ -55,5 +55,6 @@
       ]
     }
   },
-  "valid": true
+  "valid": true,
+  "loader": "as_sent"
 }
