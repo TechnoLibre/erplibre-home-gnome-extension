@@ -390,9 +390,11 @@ no path, no environment variable, no command, no plugin to turn on.
 - Key layouts: the layouts of `key_layouts` are checked against the
   format of `keymap.json` when the reply comes, then against the catalog
   the extension last read and the plugins turned off (`plugins_off` of
-  the revision, else the file's) when it comes and again at the click;
-  one outside them refuses the revision with `invalid:key_layouts`, and
-  nothing is written; no catalog read refuses every layout. `keymap.json`
+  the revision, else the file's) when it comes and again at the click,
+  unless the revision is applied already, or answered by keeping the
+  local values and still asked: it writes nothing. One outside them
+  refuses the revision with `invalid:key_layouts`, and nothing is
+  written; no catalog read refuses every layout. `keymap.json`
   is then written whole, the revision and its layouts, after
   `streamdeck.conf`: when it cannot be written, `streamdeck.conf` is put
   back as it was (removed when it did not exist) and the revision refused

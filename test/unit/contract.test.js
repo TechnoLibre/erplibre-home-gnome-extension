@@ -690,6 +690,8 @@ test('the inventory section states the key layouts on the wire', () => {
         'no catalog read refuses every layout',
         '`streamdeck.conf` is put back as it was',
         'restarts the unit once',
-        'when it comes and again at the click'])
+        'when it comes and again at the click',
+        'unless the revision is applied already, or answered by keeping '
+            + 'the local values and still asked: it writes nothing'])
         assert.ok(layouts.includes(fact), fact);
 });

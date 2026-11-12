@@ -2505,6 +2505,48 @@ test('a layout refused by a catalog is reconsidered with the next one',
         assert.deepEqual(readKeymap().layouts, LAYOUTS);
     });
 
+test('a revision applied is not refused by a catalog read later', async () => {
+    // The catalog guards what is written: an applied revision writes
+    // nothing more, whatever a later commit's --catalog prints.
+    await piloted();
+    await offer(0, config(3, {key_layouts: LAYOUTS}));
+    assert.equal((await h.service.applyConfig('d1', 3)).status, 'applied');
+    await settle(40);
+    await reply(h.calls.length - 1, ok());
+    assert.equal(readState().config.result, null, 'applied, reported');
+    h.facts = {...FACTS, erplibre: {branch: 'main', commit: 'rebuilt'}};
+    h.catalogText = 'Traceback (most recent call last):';
+    h.clockMs += 61 * 1000;
+    let next = await heartbeat();
+    assert.equal(Object.hasOwn(next.body.state, 'deck_catalog'), false);
+    await offer(h.calls.indexOf(next), config(3, {key_layouts: LAYOUTS}));
+    assert.equal(h.calls.at(-1), next, 'no result to send at once');
+    next = await heartbeat();
+    assert.equal(next.body.config.result, null);
+    assert.equal(next.body.config.revision_applied, 3);
+    assert.equal(h.service.pendingConfig(), null);
+    // A revision asking the layouts, answered by keeping the local ones,
+    // waits on nothing either while Odoo still asks it.
+    const asking = config(4, {key_layouts: {}}, {ask: ['key_layouts']});
+    const commit = async (id, text) => {
+        await reply(h.calls.length - 1, ok());
+        h.facts = {...FACTS, erplibre: {branch: 'main', commit: id}};
+        h.catalogText = text;
+        h.clockMs += 61 * 1000;
+        return heartbeat();
+    };
+    next = await commit('fixed', JSON.stringify(CATALOG));
+    await offer(h.calls.indexOf(next), asking);
+    assert.equal(h.service.pendingConfig().revision, 4);
+    assert.equal(await h.service.keepLocal('d1', 4), true);
+    await settle(40);
+    assert.equal(h.calls.at(-1).body.config.choice, 'keep_local');
+    next = await commit('broken', 'Traceback (most recent call last):');
+    await offer(h.calls.indexOf(next), asking);
+    assert.equal(h.calls.at(-1), next, 'not refused');
+    assert.equal(readState().config.refused?.revision ?? null, null);
+});
+
 test('a click rewrites only the file whose values change', async () => {
     await piloted();
     await offer(0, config(3, {deck_program: 'controller',
