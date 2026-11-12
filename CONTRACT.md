@@ -166,7 +166,9 @@ check it.
     or Cs. The extension writes only layouts whose actions and icons the
     catalog of the checkout lists (item 2 of What the extension relies
     on), for models whose geometry it gives, and no action of a plugin
-    `DECK_PLUGINS_OFF` turns off.
+    `DECK_PLUGINS_OFF` turns off. A plugin the catalog lists because it
+    is turned off may have no home key: a revision that turns it on and
+    names it gets a black key, with a line in the deck's journal.
 11. **Shared keymap fixtures.** `test/fixtures/keymap/<name>.json` holds
     `catalog` (as `--catalog` prints it), `plugins_off` (the plugins
     turned off), `layouts` (a reply's `settings.key_layouts`), `valid`,
@@ -221,7 +223,9 @@ check it.
      0, without opening a deck nor taking the deck lock: `{"format": 1,
      "actions": [<action>], "icons": [<icon>], "models": {<model>:
      {"cols": <integer>, "rows": <integer>, "keys": <integer>}}}`, the
-     actions `plugin:<id>` of the plugins that have a home key, then
+     actions `plugin:<id>` of the plugins loaded with a home key and of
+     the plugins `DECK_PLUGINS_OFF` turns off, listed without being
+     imported and so whether they have a home key or not, sorted, then
      `tiles` and `empty`; the icon names of the pattern
      `[a-z][a-z0-9_]{0,63}`; the geometry of each deck model the Stream
      Deck library knows, from 0 to 256 each. The extension runs it at its
