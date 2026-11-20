@@ -11,8 +11,10 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {DECK_UNIT, CONTROLLER_REL, DECK_ENTRY_REL, deckLockPath}
+import {DECK_UNIT, DECK_ENTRY_REL, deckLockPath}
     from '../../lib/deck-service.js';
+import {DECK_DIRS_REL, DECK_MARK, PLUGINS_NAME, CONTROLLER_NAME,
+    DECK_PROGRAM_NAME} from '../../lib/deck-layout.js';
 import {projectRootFrom, STREAMDECK_PYTHON_REL, GALLERY_SERVER_REL}
     from '../../lib/project-root.js';
 import {GALLERY_ACTION_HEADER} from '../../lib/gallery-launch.js';
@@ -197,9 +199,30 @@ test('the ERPLibre paths the extension uses are those the contract states', () =
     assert.equal(projectRootFrom(
         '/opt/x/script/gnome-extension/erplibre_home', () => null), '/opt/x');
     assert.ok(CONTRACT.includes('`/script/gnome-extension/erplibre_home`'));
-    for (const rel of [STREAMDECK_PYTHON_REL, CONTROLLER_REL, DECK_ENTRY_REL,
+    for (const rel of [STREAMDECK_PYTHON_REL, DECK_ENTRY_REL,
         DECK_UNIT, GALLERY_SERVER_REL, GALLERY_ACTION_HEADER])
         assert.ok(CONTRACT.includes(`\`${rel}`), rel);
+});
+
+test('the deck directory is looked up as the contract states', () => {
+    // The clone first, the former place second, each marked by the entry
+    // point of the package; the controller and the plugins under it.
+    const reads = section('What the extension relies on')
+        .replace(/\s+/g, ' ');
+    const [clone, former] = DECK_DIRS_REL;
+    for (const fact of [
+        `the deck directory is \`${clone}/\`, where ERPLibre clones the `
+            + 'deck program\'s own repository, or, in an older checkout '
+            + `without that clone, \`${former}/\``,
+        `the first of the two that holds \`${DECK_MARK}\`, looked up at `
+            + 'each use, the clone when neither does',
+        `\`${CONTROLLER_NAME}\` of the deck directory is the controller`,
+        `\`${clone}/${CONTROLLER_NAME}\`, or \`${former}/${CONTROLLER_NAME}\` `
+            + 'in an older checkout',
+        `\`${PLUGINS_NAME}/\` of the deck directory`,
+        `<deck directory>/${DECK_PROGRAM_NAME} --catalog`])
+        assert.ok(reads.includes(fact), fact);
+    assert.ok(section('Versioning').includes('- **1.5:** the deck directory'));
 });
 
 test('the device indicator reads the pid file the contract states', () => {
@@ -301,14 +324,14 @@ test('the controller menu reaches the gallery the contract states', () => {
 // lib/inventory.js; the GJS modules (keyring, state file) are read as text,
 // since importing them needs the fakes of gjs-fake.js.
 
-test('the contract is at 1.4 since Odoo lays out the home keys', () => {
-    assert.ok(CONTRACT.includes('**Contract version: 1.4**'));
-    for (const v of ['1\\.4', '1\\.3', '1\\.2']) {
+test('the contract is at 1.5 since the deck has its own directory', () => {
+    assert.ok(CONTRACT.includes('**Contract version: 1.5**'));
+    for (const v of ['1\\.5', '1\\.4', '1\\.3', '1\\.2']) {
         assert.match(section('Versioning'),
             new RegExp(`^- \\*\\*${v}:\\*\\* `, 'm'));
     }
     const service = text('lib/inventory-service.js');
-    assert.ok(service.includes("export const CONTRACT_VERSION = '1.4';"));
+    assert.ok(service.includes("export const CONTRACT_VERSION = '1.5';"));
 });
 
 test('the extension relies on the Odoo routes of the inventory section', () => {
@@ -653,7 +676,7 @@ test('the contract states the catalog the deck program prints', () => {
     const reads = section('What the extension relies on')
         .replace(/\s+/g, ' ');
     for (const fact of [
-        '`.venv.streamdeck/bin/python script/stream_deck/erplibre_streamdeck '
+        '`.venv.streamdeck/bin/python <deck directory>/erplibre_streamdeck '
             + '--catalog`',
         'prints the catalog of the deck program as JSON and exits 0, '
             + 'without opening a deck nor taking the deck lock',
@@ -665,7 +688,7 @@ test('the contract states the catalog the deck program prints', () => {
         `abandons it after ${TIMEOUT_S} s`])
         assert.ok(reads.includes(fact), fact);
     const service = text('lib/inventory-service.js');
-    assert.ok(service.includes("'script/stream_deck/erplibre_streamdeck'"));
+    assert.ok(service.includes('deckPaths(root, isFile).program'));
     assert.ok(service.includes("'--catalog'"));
 });
 

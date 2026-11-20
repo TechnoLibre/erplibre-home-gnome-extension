@@ -5,7 +5,8 @@ import {projectRootFrom, makeGioReadLink, normalizePath, resolveLinkTarget,
     resolveLinks,
     streamDeckPython, galleryServerCommand, galleryReady}
     from '../../lib/project-root.js';
-import {openDeckArgv} from '../../lib/deck-service.js';
+import {openDeckArgv, missingDeckController}
+    from '../../lib/deck-service.js';
 import {buildSeleniumLoginStep} from '../../lib/spawn.js';
 
 const CHECKOUT = '/opt/depot';
@@ -326,41 +327,54 @@ test('galleryReady needs both the deck venv and the gallery server', () => {
 // A GLib double: file_test answers from `present`, the paths it holds.
 function fakeGLib(present) {
     return {
-        FileTest: {EXISTS: 'exists', IS_EXECUTABLE: 'exec'},
+        FileTest: {EXISTS: 'exists', IS_EXECUTABLE: 'exec',
+            IS_REGULAR: 'regular'},
         file_test: (p) => present.has(p),
         get_user_config_dir: () => '/opt/maison/.config',
         get_home_dir: () => '/opt/maison',
     };
 }
 
-test('the deck indicator looks the venv up at each click', () => {
+test('the deck indicator looks the venv and the deck up at each click', () => {
     // Without the unit nor the venv, the click notifies and starts
-    // nothing; the same indicator finds a venv added after the session
-    // started.
+    // nothing; with the venv but no deck program, it names the clone's
+    // controller and starts nothing; the same indicator finds a venv, and
+    // a deck clone, added after the session started.
     const body = methodBody(extensionFile('indicators/device.js'),
         '_launchController', '');
     const present = new Set();
     const notices = [];
     const spawned = [];
     const launch = new Function('GLib', 'streamDeckPython', 'openDeckArgv',
-        '_notify', '_', 'spawnDetached', body);
+        'missingDeckController', '_notify', '_', 'spawnDetached', body);
     const fake = {
         _projectRoot: () => CHECKOUT,
         _deckUnitExists: () => false,
         _driveUnit: () => assert.fail('no unit to drive'),
     };
     const click = () => launch.call(fake, fakeGLib(present), streamDeckPython,
-        openDeckArgv, (...a) => notices.push(a), (s) => s,
-        (argv) => spawned.push(argv));
+        openDeckArgv, missingDeckController, (...a) => notices.push(a),
+        (s) => s, (argv) => spawned.push(argv));
     click();
     assert.deepEqual(notices, [['Stream Deck', NOT_INSTALLED]]);
     assert.deepEqual(spawned, []);
     present.add(DECK_PYTHON);
     click();
-    assert.equal(notices.length, 1);
-    assert.deepEqual(spawned,
-        [[DECK_PYTHON,
-            `${CHECKOUT}/script/stream_deck/erplibre_controller.py`]]);
+    assert.deepEqual(notices[1], ['Stream Deck',
+        'The deck program is missing, no ' +
+        `${CHECKOUT}/script/stream_deck/deck/erplibre_controller.py: ` +
+        'make erplibre_home_streamdeck_install']);
+    assert.deepEqual(spawned, []);
+    for (const dir of ['script/stream_deck', 'script/stream_deck/deck']) {
+        present.add(`${CHECKOUT}/${dir}/erplibre_streamdeck/__main__.py`);
+        present.add(`${CHECKOUT}/${dir}/erplibre_controller.py`);
+        click();
+    }
+    assert.equal(notices.length, 2);
+    assert.deepEqual(spawned, [
+        [DECK_PYTHON, `${CHECKOUT}/script/stream_deck/erplibre_controller.py`],
+        [DECK_PYTHON,
+            `${CHECKOUT}/script/stream_deck/deck/erplibre_controller.py`]]);
 });
 
 test('the gallery entry looks the venv up at each click', async () => {

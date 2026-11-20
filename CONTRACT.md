@@ -1,6 +1,6 @@
 # Contract between the extension and ERPLibre
 
-**Contract version: 1.4**
+**Contract version: 1.5**
 
 The extension runs on its own (see `README.md`). ERPLibre also clones this
 repository at `script/gnome-extension/erplibre_home/`, by Google Repo or by
@@ -89,23 +89,24 @@ check it.
    - `$XDG_STATE_HOME/erplibre-home/`: `claude/`, `mpv/` and
      `todo_terminals.json`, which item 6 describes, and `todo/`, the logs
      of the TODO terminals;
-   - `$XDG_CACHE_HOME/erplibre-home/controller.pid`: written by ERPLibre's
-     Stream Deck controller, read by the device indicator;
+   - `$XDG_CACHE_HOME/erplibre-home/controller.pid`: written by the
+     controller of the deck directory (item 2 of What the extension
+     relies on), read by the device indicator;
    - `$XDG_RUNTIME_DIR/erplibre-home/deck.lock`: text `<pid> <program>`,
-     written by ERPLibre's deck lock, read by the extension.
+     written by the deck lock of the deck program, read by the extension.
 6. **Records** in `$XDG_STATE_HOME/erplibre-home/`, each JSON. A reader
    takes a missing key as empty text or 0 and ignores the keys it does not
    know; a writer may add keys.
    - `claude/<session_id>.json`, one per Claude Code session: written by
      `hooks/erplibre-home-hook.py` at each hook event and removed at the
-     end of the session, read by the extension and by ERPLibre's Stream
-     Deck. The latest of the four timestamps gives the session's status;
+     end of the session, read by the extension and by the deck program.
+     The latest of the four timestamps gives the session's status;
      `description`, when empty, falls back to `last_prompt`.
    - `mpv/<pid>.json`, one per mpv player the extension started: written
-     by the extension and removed when the player exits, read by
-     ERPLibre's Stream Deck.
+     by the extension and removed when the player exits, read by the
+     deck program.
    - `todo_terminals.json`, an array with one entry per TODO terminal:
-     the extension and ERPLibre's Stream Deck each add their own entries
+     the extension and the deck program each add their own entries
      and rewrite the whole file.
 
    | Record | Key | Type |
@@ -194,7 +195,15 @@ check it.
    works the same.
 2. **Stream Deck level,** relative to that root:
    - `.venv.streamdeck/bin/python` runs the deck programs;
-   - `script/stream_deck/erplibre_controller.py` is the controller;
+   - the deck directory is `script/stream_deck/deck/`, where ERPLibre
+     clones the deck program's own repository, or, in an older checkout
+     without that clone, `script/stream_deck/`: the first of the two
+     that holds `erplibre_streamdeck/__main__.py`, looked up at each use,
+     the clone when neither does. The controller, the deck program and
+     its plugins below all come from that one directory;
+   - `erplibre_controller.py` of the deck directory is the controller:
+     `script/stream_deck/deck/erplibre_controller.py`, or
+     `script/stream_deck/erplibre_controller.py` in an older checkout;
    - `script/install/erplibre_home_deck.sh --check` exits 0 when the deck
      program may start; otherwise its last stderr line is the reason;
    - the systemd user unit `erplibre-home-streamdeck.service`, in
@@ -215,10 +224,10 @@ check it.
      into this file, then restarts the unit with
      `systemctl --user restart`;
    - deck plugins are the `*.py` files, not starting with `_`, of
-     `script/stream_deck/erplibre_streamdeck/plugins/` and of
+     `erplibre_streamdeck/plugins/` of the deck directory and of
      `$XDG_CONFIG_HOME/erplibre-home/deck-plugins/`, named by the file
      without `.py`;
-   - `.venv.streamdeck/bin/python script/stream_deck/erplibre_streamdeck
+   - `.venv.streamdeck/bin/python <deck directory>/erplibre_streamdeck
      --catalog` prints the catalog of the deck program as JSON and exits
      0, without opening a deck nor taking the deck lock: `{"format": 1,
      "actions": [<action>], "icons": [<icon>], "models": {<model>:
@@ -486,6 +495,11 @@ ERPLibre follows `main`: a MAJOR change is pushed on both sides together.
 The wire of the Odoo inventory is versioned by its `protocol` the same
 way, MAJOR for what Odoo can see, MINOR for an optional addition; this
 file's version moves with it.
+
+- **1.5:** the deck directory: the controller, the deck program and its
+  plugins are read from `script/stream_deck/deck/`, the clone of the
+  deck program's repository, then from `script/stream_deck/` for an
+  older checkout.
 
 - **1.4:** the key layouts, protocol 1.2: the state carries
   `deck_catalog`, the output of the deck program's `--catalog`; the

@@ -100,6 +100,11 @@ d'ERPLibre qu'utilise l'extension. Un changement qui le rompt augmente la
 version MAJOR du contrat et va sur `main` en même temps que le changement
 correspondant dans ERPLibre.
 
+Le programme Stream Deck est un dépôt à part, qu'ERPLibre clone dans
+`script/stream_deck/deck/`. Dans un checkout plus ancien, sans ce clone,
+l'extension trouve le même programme directement sous
+`script/stream_deck/` (`lib/deck-layout.js`).
+
 ERPLibre garde aussi les captures d'écran de l'extension et du deck, dans
 `script/stream_deck/screenshots/`, avec le `capture.sh` qui les prend.
 

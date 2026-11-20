@@ -97,6 +97,11 @@ ERPLibre uses, and the paths of ERPLibre the extension uses. A change
 that breaks it bumps the contract's MAJOR version and goes to `main`
 together with the matching change in ERPLibre.
 
+The Stream Deck program is a repository of its own, which ERPLibre clones
+at `script/stream_deck/deck/`. In an older checkout without that clone,
+the extension finds the same program directly under `script/stream_deck/`
+(`lib/deck-layout.js`).
+
 ERPLibre also keeps the screenshots of the extension and of the deck, in
 `script/stream_deck/screenshots/`, with the `capture.sh` that takes them.
 

@@ -200,6 +200,11 @@ ERPLibre uses, and the paths of ERPLibre the extension uses. A change
 that breaks it bumps the contract's MAJOR version and goes to `main`
 together with the matching change in ERPLibre.
 
+The Stream Deck program is a repository of its own, which ERPLibre clones
+at `script/stream_deck/deck/`. In an older checkout without that clone,
+the extension finds the same program directly under `script/stream_deck/`
+(`lib/deck-layout.js`).
+
 ERPLibre also keeps the screenshots of the extension and of the deck, in
 `script/stream_deck/screenshots/`, with the `capture.sh` that takes them.
 
@@ -212,6 +217,11 @@ fichiers, outils et méthodes D-Bus qu'utilise ERPLibre, et les chemins
 d'ERPLibre qu'utilise l'extension. Un changement qui le rompt augmente la
 version MAJOR du contrat et va sur `main` en même temps que le changement
 correspondant dans ERPLibre.
+
+Le programme Stream Deck est un dépôt à part, qu'ERPLibre clone dans
+`script/stream_deck/deck/`. Dans un checkout plus ancien, sans ce clone,
+l'extension trouve le même programme directement sous
+`script/stream_deck/` (`lib/deck-layout.js`).
 
 ERPLibre garde aussi les captures d'écran de l'extension et du deck, dans
 `script/stream_deck/screenshots/`, avec le `capture.sh` qui les prend.

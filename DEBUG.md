@@ -17,7 +17,7 @@ the same steps by hand, and `hooks/install_claude_hooks.py` stands for
 | `~/.local/state/erplibre-home/log.jsonl` | JSONL append-only log written by `lib/log.js` (subprocess errors, mpv launches, hook failures). The Activity log page in prefs reads the last 200 lines. |
 | `~/.local/state/erplibre-home/claude/*.json` | One file per Claude session, written by `hooks/erplibre-home-hook.py`. `cat` them to see the timestamps the indicator drives off. |
 | `~/.local/state/erplibre-home/mpv/*.json` | One file per running mpv launched from the deck. Removed automatically when the player exits. |
-| Stream Deck driver: stderr of `script/stream_deck/erplibre_controller.py` | Open the Activity Monitor page in prefs, or run the controller from a terminal to see button-press errors. |
+| Stream Deck driver: stderr of `script/stream_deck/deck/erplibre_controller.py` (`script/stream_deck/erplibre_controller.py` in an older checkout) | Open the Activity Monitor page in prefs, or run the controller from a terminal to see button-press errors. |
 
 ## D-Bus introspection
 
