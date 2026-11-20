@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {readFileSync, realpathSync, statSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {DECK_UNIT, DECK_ENTRY_REL, DECK_READ_AT_MS,
-    deckUnitPath, deckLockPath, openDeckArgv, restartDeckArgv, deckStateArgv,
+    deckUnitPath, deckLockPath, openDeckArgv, missingDeckController,
+    restartDeckArgv, deckStateArgv,
     deckRunning, deckCheckArgv, deckStartFailure, parseUnitShow,
     deckStartOutcome, deckStartSettled, awaitDeckStart, parseLockHolder,
     deckStartNotice}
@@ -32,23 +33,77 @@ test('with the unit, open starts the unit whatever the venv', () => {
     }
 });
 
+// An isFile that answers true for the deck program and the controller of
+// each directory of `dirs`.
+function deckFiles(dirs) {
+    return (p) => dirs.some((d) => p === `${d}/${DECK_MARK}` ||
+        p === `${d}/erplibre_controller.py`);
+}
+
+const CLONE = `${ROOT}/script/stream_deck/deck`;
+const FORMER = `${ROOT}/script/stream_deck`;
+
 test('without the unit, open runs the controller under the venv', () => {
     // The controller of the deck clone, else of an older checkout's
-    // script/stream_deck/; the clone's when neither holds the deck.
-    const clone = `${ROOT}/script/stream_deck/deck`;
-    const former = `${ROOT}/script/stream_deck`;
-    for (const [present, dir] of [[[clone, former], clone],
-        [[former], former], [[], clone]]) {
-        const isFile = (p) => present.some((d) => p === `${d}/${DECK_MARK}`);
+    // script/stream_deck/.
+    for (const [present, dir] of [[[CLONE, FORMER], CLONE],
+        [[FORMER], FORMER]]) {
+        const isFile = deckFiles(present);
         assert.deepEqual(openDeckArgv({unitExists: false, python: PYTHON,
             root: `${ROOT}/`, isFile}),
         [PYTHON, `${dir}/erplibre_controller.py`], dir);
+        assert.equal(missingDeckController(
+            {unitExists: false, root: ROOT, isFile}), null, dir);
     }
 });
 
 test('without the unit nor the venv, open gives null', () => {
     assert.equal(openDeckArgv({unitExists: false, python: null, root: ROOT}),
         null);
+});
+
+test('without the unit, a missing controller is named, not started', () => {
+    // python started on a missing file would exit 2 after a successful
+    // spawn: open gives null and the controller looked for is named, the
+    // clone's when no directory holds the deck program.
+    const cases = [
+        [deckFiles([]), `${CLONE}/erplibre_controller.py`],
+        [(p) => p === `${FORMER}/${DECK_MARK}`,
+            `${FORMER}/erplibre_controller.py`],
+        [() => { throw new Error('EACCES'); },
+            `${CLONE}/erplibre_controller.py`],
+        [undefined, `${CLONE}/erplibre_controller.py`],
+    ];
+    for (const [isFile, controller] of cases) {
+        assert.equal(openDeckArgv({unitExists: false, python: PYTHON,
+            root: ROOT, isFile}), null, controller);
+        assert.equal(missingDeckController(
+            {unitExists: false, root: ROOT, isFile}), controller);
+    }
+});
+
+test('with the unit, no controller is reported missing', () => {
+    // The unit runs the entry point, which says itself what is missing.
+    assert.equal(missingDeckController(
+        {unitExists: true, root: ROOT, isFile: deckFiles([])}), null);
+    assert.deepEqual(openDeckArgv({unitExists: true, python: PYTHON,
+        root: ROOT, isFile: deckFiles([])}),
+    ['systemctl', '--user', 'start', DECK_UNIT]);
+});
+
+test('the missing-controller notice: a msgid of the .pot, in fr and en', () => {
+    const msgid = 'The deck program is missing, no {path}: ' +
+        'make erplibre_home_streamdeck_install';
+    const src = extensionFile('indicators/device.js');
+    assert.ok(src.includes(`_('${msgid}')`));
+    assert.ok(src.includes('missingDeckController('));
+    assert.ok(extensionFile('po/erplibre-home.pot').includes(
+        `msgid "${msgid}"\nmsgstr ""`));
+    assert.ok(extensionFile('po/en.po').includes(
+        `msgid "${msgid}"\nmsgstr "${msgid}"`));
+    assert.ok(extensionFile('po/fr.po').includes(
+        `msgid "${msgid}"\nmsgstr "Le programme du deck est absent, ` +
+        'pas de {path} : make erplibre_home_streamdeck_install"'));
 });
 
 test('restart goes through the unit only when it exists', () => {

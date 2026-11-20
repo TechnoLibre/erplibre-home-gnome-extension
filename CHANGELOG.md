@@ -151,6 +151,12 @@ migrations that are not auto-applied.
   `make erplibre_home_install_extension`.
 
 ### Fixed
+- Without the deck unit, the device indicator no longer starts the deck
+  venv's python on a controller that is not there, which exited at once
+  and left the click without any visible effect: when neither the deck
+  clone nor `script/stream_deck/` holds the controller, a notice names
+  the clone's controller and `make erplibre_home_streamdeck_install`
+  (`missingDeckController()` in `lib/deck-service.js`).
 - Auto-login keeps the password off every command line and out of the
   log: Selenium receives it in the `ERPLIBRE_HOME_LOGIN_PASSWORD`
   environment variable, named by `--default_password_auth_env`, and logs

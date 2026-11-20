@@ -881,6 +881,9 @@ msgstr "Invalid position format"
 msgid "ERPLibre Home Stream Deck is not installed: make erplibre_home_streamdeck_install"
 msgstr "ERPLibre Home Stream Deck is not installed: make erplibre_home_streamdeck_install"
 
+msgid "The deck program is missing, no {path}: make erplibre_home_streamdeck_install"
+msgstr "The deck program is missing, no {path}: make erplibre_home_streamdeck_install"
+
 msgid "Scan failed: {err}"
 msgstr "Scan failed: {err}"
 

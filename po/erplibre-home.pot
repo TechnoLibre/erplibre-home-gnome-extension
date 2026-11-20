@@ -845,6 +845,9 @@ msgstr ""
 msgid "ERPLibre Home Stream Deck is not installed: make erplibre_home_streamdeck_install"
 msgstr ""
 
+msgid "The deck program is missing, no {path}: make erplibre_home_streamdeck_install"
+msgstr ""
+
 msgid "Scan failed: {err}"
 msgstr ""
 
