@@ -2,13 +2,14 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync, realpathSync, statSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
-import {DECK_UNIT, CONTROLLER_REL, DECK_ENTRY_REL, DECK_READ_AT_MS,
+import {DECK_UNIT, DECK_ENTRY_REL, DECK_READ_AT_MS,
     deckUnitPath, deckLockPath, openDeckArgv, restartDeckArgv, deckStateArgv,
     deckRunning, deckCheckArgv, deckStartFailure, parseUnitShow,
     deckStartOutcome, deckStartSettled, awaitDeckStart, parseLockHolder,
     deckStartNotice}
     from '../../lib/deck-service.js';
 import {projectRootFrom} from '../../lib/project-root.js';
+import {DECK_MARK} from '../../lib/deck-layout.js';
 
 const ROOT = '/opt/mon depot';
 const PYTHON = `${ROOT}/.venv.streamdeck/bin/python`;
@@ -32,9 +33,17 @@ test('with the unit, open starts the unit whatever the venv', () => {
 });
 
 test('without the unit, open runs the controller under the venv', () => {
-    assert.deepEqual(
-        openDeckArgv({unitExists: false, python: PYTHON, root: `${ROOT}/`}),
-        [PYTHON, `${ROOT}/${CONTROLLER_REL}`]);
+    // The controller of the deck clone, else of an older checkout's
+    // script/stream_deck/; the clone's when neither holds the deck.
+    const clone = `${ROOT}/script/stream_deck/deck`;
+    const former = `${ROOT}/script/stream_deck`;
+    for (const [present, dir] of [[[clone, former], clone],
+        [[former], former], [[], clone]]) {
+        const isFile = (p) => present.some((d) => p === `${d}/${DECK_MARK}`);
+        assert.deepEqual(openDeckArgv({unitExists: false, python: PYTHON,
+            root: `${ROOT}/`, isFile}),
+        [PYTHON, `${dir}/erplibre_controller.py`], dir);
+    }
 });
 
 test('without the unit nor the venv, open gives null', () => {
@@ -274,11 +283,19 @@ const EXTENSION_DIR = realpathSync(
 const CHECKOUT = projectRootFrom(EXTENSION_DIR, null);
 const IN_CHECKOUT = CHECKOUT !== EXTENSION_DIR;
 
-test('the controller path is relative to the checkout root', {
+test('the controller open runs is a file of the checkout', {
     skip: IN_CHECKOUT ? false : 'not inside an ERPLibre checkout',
 }, () => {
-    assert.equal(CONTROLLER_REL, 'script/stream_deck/erplibre_controller.py');
-    assert.ok(statSync(`${CHECKOUT}/${CONTROLLER_REL}`).isFile());
+    const isFile = (p) => {
+        try {
+            return statSync(p).isFile();
+        } catch (_e) {
+            return false;
+        }
+    };
+    const [, controller] = openDeckArgv(
+        {unitExists: false, python: PYTHON, root: CHECKOUT, isFile});
+    assert.ok(statSync(controller).isFile());
 });
 
 test('the check runs the entry point of the checkout with --check', () => {
@@ -314,6 +331,9 @@ test('the device indicator takes its argv from this module', () => {
     assert.ok(src.includes('deckLockPath(GLib.get_user_runtime_dir())'));
     assert.ok(src.includes('deckUnitPath(GLib.get_user_config_dir())'));
     assert.ok(!src.includes("const CONTROLLER_REL"));
+    assert.ok(src.includes(
+        'const isFile = (p) => GLib.file_test(p, GLib.FileTest.IS_REGULAR);'));
+    assert.ok(src.includes('python: py, root, isFile});'));
 });
 
 test('the indicator waits without blocking, and drops the wait on destroy',

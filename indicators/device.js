@@ -262,8 +262,11 @@ class DeviceIndicator extends PanelMenu.Button {
         // level added after the session started is found.
         const py = streamDeckPython(root,
             (p) => GLib.file_test(p, GLib.FileTest.IS_EXECUTABLE));
+        // The controller, in the deck clone or, in an older checkout,
+        // directly under script/stream_deck/: looked up at the click too.
+        const isFile = (p) => GLib.file_test(p, GLib.FileTest.IS_REGULAR);
         const argv = openDeckArgv(
-            {unitExists: this._deckUnitExists(), python: py, root});
+            {unitExists: this._deckUnitExists(), python: py, root, isFile});
         if (argv === null) {
             _notify('Stream Deck',
                 _('ERPLibre Home Stream Deck is not installed: make erplibre_home_streamdeck_install'));

@@ -326,17 +326,18 @@ test('galleryReady needs both the deck venv and the gallery server', () => {
 // A GLib double: file_test answers from `present`, the paths it holds.
 function fakeGLib(present) {
     return {
-        FileTest: {EXISTS: 'exists', IS_EXECUTABLE: 'exec'},
+        FileTest: {EXISTS: 'exists', IS_EXECUTABLE: 'exec',
+            IS_REGULAR: 'regular'},
         file_test: (p) => present.has(p),
         get_user_config_dir: () => '/opt/maison/.config',
         get_home_dir: () => '/opt/maison',
     };
 }
 
-test('the deck indicator looks the venv up at each click', () => {
+test('the deck indicator looks the venv and the deck up at each click', () => {
     // Without the unit nor the venv, the click notifies and starts
-    // nothing; the same indicator finds a venv added after the session
-    // started.
+    // nothing; the same indicator finds a venv, and a deck clone, added
+    // after the session started.
     const body = methodBody(extensionFile('indicators/device.js'),
         '_launchController', '');
     const present = new Set();
@@ -356,11 +357,16 @@ test('the deck indicator looks the venv up at each click', () => {
     assert.deepEqual(notices, [['Stream Deck', NOT_INSTALLED]]);
     assert.deepEqual(spawned, []);
     present.add(DECK_PYTHON);
+    present.add(`${CHECKOUT}/script/stream_deck/erplibre_streamdeck/__main__.py`);
+    click();
+    present.add(
+        `${CHECKOUT}/script/stream_deck/deck/erplibre_streamdeck/__main__.py`);
     click();
     assert.equal(notices.length, 1);
-    assert.deepEqual(spawned,
-        [[DECK_PYTHON,
-            `${CHECKOUT}/script/stream_deck/erplibre_controller.py`]]);
+    assert.deepEqual(spawned, [
+        [DECK_PYTHON, `${CHECKOUT}/script/stream_deck/erplibre_controller.py`],
+        [DECK_PYTHON,
+            `${CHECKOUT}/script/stream_deck/deck/erplibre_controller.py`]]);
 });
 
 test('the gallery entry looks the venv up at each click', async () => {

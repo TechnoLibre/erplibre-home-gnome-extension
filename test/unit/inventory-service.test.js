@@ -1390,10 +1390,23 @@ test('collectFacts lists the deck plugins of the checkout and the user',
                 return {stdout: `${ext}/extension.js\n`};
             return {stdout: 'x\n'};
         };
+        // An older checkout: the deck program directly under
+        // script/stream_deck/, marked by its entry point.
+        fs.writeFileSync(path.join(plugins, '..', '__main__.py'), '');
         const facts = await svc.collectFacts({extensionPath: EXT_LINK,
             osRelease: []});
         assert.deepEqual([...facts.deckPlugins].sort(),
             ['clock', 'custom', 'timers']);
+        // The deck clone, once there, is read instead of the former place.
+        const cloned = path.join(root,
+            'script/stream_deck/deck/erplibre_streamdeck/plugins');
+        fs.mkdirSync(cloned, {recursive: true});
+        fs.writeFileSync(path.join(cloned, '..', '__main__.py'), '');
+        fs.writeFileSync(path.join(cloned, 'sound.py'), '');
+        const fromClone = await svc.collectFacts({extensionPath: EXT_LINK,
+            osRelease: []});
+        assert.deepEqual([...fromClone.deckPlugins].sort(),
+            ['custom', 'sound', 'timers']);
         fake.onSpawn = () => ({exit: 1});
         const outside = await svc.collectFacts({extensionPath: EXT_LINK,
             osRelease: []});
@@ -2214,9 +2227,16 @@ function writeKeymap(text) {
 test('the catalog is the deck program\'s --catalog of the checkout',
     async () => {
         const root = '/srv/invented-erplibre';
+        // The deck clone's program, else an older checkout's; the clone's
+        // when neither is on disk.
         assert.deepEqual(svc.catalogArgv(root), [
             `${root}/.venv.streamdeck/bin/python`,
-            `${root}/script/stream_deck/erplibre_streamdeck`, '--catalog']);
+            `${root}/script/stream_deck/deck/erplibre_streamdeck`,
+            '--catalog']);
+        const former = `${root}/script/stream_deck/erplibre_streamdeck`;
+        assert.deepEqual(
+            svc.catalogArgv(root, (p) => p === `${former}/__main__.py`),
+            [`${root}/.venv.streamdeck/bin/python`, former, '--catalog']);
         fake.onSpawn = argv => {
             if (argv[0] === 'realpath')
                 return {stdout: `${EXT_REAL}/extension.js\n`};

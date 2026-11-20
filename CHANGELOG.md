@@ -68,6 +68,13 @@ migrations that are not auto-applied.
   the same two commands, unchanged without the variables.
 
 ### Changed
+- `CONTRACT.md` 1.5: the deck program is a repository of its own, which
+  ERPLibre clones at `script/stream_deck/deck/`. The device indicator's
+  controller, the inventory's `--catalog` and its list of deck plugins
+  are read from that clone, or from `script/stream_deck/` in an older
+  checkout without it: the first that holds
+  `erplibre_streamdeck/__main__.py`, looked up at each use
+  (`lib/deck-layout.js`). The inventory reports `contract_version` 1.5.
 - `CONTRACT.md` 1.3 and inventory protocol 1.1: the report carries
   `config` (`{"pilot": false}` until a destination is the pilot) and
   `state.deck_plugins`; the reply may carry the configuration of the
