@@ -151,6 +151,12 @@ migrations that are not auto-applied.
   `make erplibre_home_install_extension`.
 
 ### Fixed
+- An install no longer prints twelve `msgfmt --check` warnings that read
+  like a failure: the headers of `po/en.po` and `po/fr.po` carry the
+  fields gettext expects (Project-Id-Version, PO-Revision-Date,
+  Last-Translator, Language-Team, MIME-Version,
+  Content-Transfer-Encoding), and a test compiles each catalogue and
+  expects no output.
 - Without the deck unit, the device indicator no longer starts the deck
   venv's python on a controller that is not there, which exited at once
   and left the click without any visible effect: when neither the deck
