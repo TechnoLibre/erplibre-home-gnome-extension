@@ -117,6 +117,29 @@ class TestMetadataAndSchema(unittest.TestCase):
         self.assertTrue((EXT / "po" / f"{DOMAIN}.pot").is_file())
 
 
+    @unittest.skipUnless(shutil.which("msgfmt"), "msgfmt (gettext) absent")
+    def test_each_catalogue_compiles_without_a_warning(self):
+        """An install compiles each po/<lang>.po with `msgfmt --check`: a
+        header field it misses is a warning on every install, which reads
+        like a failure. Each catalogue compiles silently."""
+        with tempfile.TemporaryDirectory() as tmp:
+            for po in sorted((EXT / "po").glob("*.po")):
+                with self.subTest(po=po.name):
+                    fait = subprocess.run(
+                        [
+                            "msgfmt",
+                            "--check",
+                            "-o",
+                            os.path.join(tmp, po.stem + ".mo"),
+                            str(po),
+                        ],
+                        capture_output=True,
+                        text=True,
+                        env=dict(os.environ, LC_ALL="C"),
+                    )
+                    self.assertEqual(0, fait.returncode, fait.stderr)
+                    self.assertEqual("", fait.stderr)
+
 class TestDbusClients(unittest.TestCase):
     """The clients this repository holds name the path and interface
     extension.js exports, and a method it declares."""
